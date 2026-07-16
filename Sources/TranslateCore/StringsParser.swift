@@ -1,24 +1,41 @@
 // StringsParser.swift
 // Parse/write legacy .strings "key" = "value"; format.
+// Adapted from the well-established regex pattern used across Apple tooling.
 
 import Foundation
 
+/// Parses and writes legacy `.strings` files.
+///
+/// `.strings` format reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/LoadingResources/Strings/Strings.html
+/// This parser handles the common single-file source format where all source strings
+/// live in one flat file. Output is written per-locale into `{locale}.lproj/` subdirectories
+/// by `main.swift` — not by this parser — to avoid a single-path overwrite when multiple
+/// locales are translated in sequence.
 public enum StringsParser {
-    // Matches: "key" = "value";
-    // Handles escaped quotes and backslashes inside values.
-    // nonisolated(unsafe): Regex is not Sendable in Swift 6 but is constructed once
-    // at module load and never mutated — safe to share across isolation contexts.
+
+    // Regex note: `nonisolated(unsafe)` is required because `Regex` is not `Sendable` in
+    // Swift 6. The regex is constructed once at module load and never mutated, so sharing
+    // it across isolation contexts is safe in practice. This is a known Swift 6 rough edge
+    // with static stored Regex values — not a data race.
+    // See: https://forums.swift.org/t/regex-sendable/64573
+    //
+    // Pattern matches:  "key" = "value";
+    // Handles:          escaped quotes (\") and backslashes inside keys/values.
+    // Does NOT match:   block-comment lines (stripped before regex) or line-comment lines (skipped below).
     nonisolated(unsafe) private static let linePattern = #/^\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)+)"\s*;/#
 
+    /// Parses a `.strings` file and returns a `[key: value]` dictionary.
+    /// Block comments (`/* ... */`) are stripped before line matching.
+    /// Line comments (`//`) are skipped.
     public static func parse(from url: URL) throws -> [String: String] {
         let raw = try String(contentsOf: url, encoding: .utf8)
         var result: [String: String] = [:]
-        // Strip block comments /* ... */ before line matching
+        // Strip block comments first so "key" = "value"; lines inside a block comment
+        // are not accidentally matched by the line pattern.
         let stripped = raw.replacing(#/\/\*[\s\S]*?\*\//#, with: "")
         for line in stripped.components(separatedBy: "\n") {
-            // Skip line comments
             let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.hasPrefix("//") { continue }
+            if trimmed.hasPrefix("//") { continue }   // skip line comments
             if let match = try? linePattern.firstMatch(in: line) {
                 let key = String(match.output.1).replacingOccurrences(of: "\\\"", with: "\"")
                 let value = String(match.output.2).replacingOccurrences(of: "\\\"", with: "\"")
@@ -28,6 +45,8 @@ public enum StringsParser {
         return result
     }
 
+    /// Writes a `[key: value]` dictionary as a `.strings` file.
+    /// Keys are sorted for stable git diffs. Quotes inside keys/values are escaped.
     public static func write(_ strings: [String: String], to url: URL) throws {
         let lines = strings.keys.sorted().map { key -> String in
             let escapedKey = key.replacingOccurrences(of: "\"", with: "\\\"")

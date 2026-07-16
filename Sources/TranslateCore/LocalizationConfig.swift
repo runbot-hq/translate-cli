@@ -1,30 +1,30 @@
 // LocalizationConfig.swift
-// Codable model for localization.config.json.
-// Read by the CLI directly via --config flag.
-// The TypeScript action layer never reads this file directly —
-// it passes --config path/to/localization.config.json to the CLI.
+// Codable model for localization.config.json — consumed by the Swift CLI directly
+// via the --config flag. The TypeScript action passes --config to the CLI and
+// never reads this file itself, keeping the CLI self-contained and testable outside CI.
 
 import Foundation
 
+/// Represents `localization.config.json` in the consuming repo.
+///
+/// This file is the primary way non-developers configure translation:
+/// they can edit it directly on GitHub.com to add/remove languages without
+/// touching workflow YAML.
+///
+/// `quality` and `inputFile` are optional — they duplicate CLI flags and
+/// are provided for convenience. CLI flags always take precedence if both are set.
 public struct LocalizationConfig: Codable, Sendable {
-    public var sourceLanguage: String       // default "en"
+    /// Source language code (e.g. `"en"`). Overridden by `--source-language` CLI flag if provided.
+    public var sourceLanguage: String
+    /// Target language codes (e.g. `["de", "fr", "ja"]`). Overridden by `--languages` CLI flag if provided.
     public var targetLanguages: [String]
-    public var quality: String?             // "high" | "fast"
+    /// Optional quality hint (`"high"` or `"fast"`). Overridden by `--quality` CLI flag.
+    public var quality: String?
+    /// Optional default input file path. Not used by the CLI — for documentation/tooling only.
     public var inputFile: String?
-
-    public init(
-        sourceLanguage: String = "en",
-        targetLanguages: [String],
-        quality: String? = nil,
-        inputFile: String? = nil
-    ) {
-        self.sourceLanguage = sourceLanguage
-        self.targetLanguages = targetLanguages
-        self.quality = quality
-        self.inputFile = inputFile
-    }
 }
 
+/// Loads and decodes `localization.config.json`.
 public enum LocalizationConfigLoader {
     public static func load(from path: String) throws -> LocalizationConfig {
         let url = URL(filePath: path)

@@ -7,6 +7,10 @@ import Foundation
 
 // MARK: - Codable Models
 
+/// Root structure of an `.xcstrings` file.
+/// `.xcstrings` is JSON under the hood — `JSONDecoder` handles it directly.
+/// Only the fields we need are modelled here; Xcode-generated fields we don't
+/// use (e.g. `localizedStringsVariants`) are silently ignored by the decoder.
 public struct XCStrings: Codable, Sendable {
     public var version: String
     public var sourceLanguage: String
@@ -19,6 +23,9 @@ public struct XCStrings: Codable, Sendable {
     }
 }
 
+/// One entry in the `strings` dict — one localizable key.
+/// `comment` and `extractionState` are round-tripped unchanged so we don't corrupt
+/// any Xcode metadata already in the file.
 public struct XCStringEntry: Codable, Sendable {
     public var comment: String?
     public var extractionState: String?
@@ -31,6 +38,7 @@ public struct XCStringEntry: Codable, Sendable {
     }
 }
 
+/// Localization entry for one locale within an `XCStringEntry`.
 public struct XCLocalization: Codable, Sendable {
     public var stringUnit: XCStringUnit?
 
@@ -39,6 +47,9 @@ public struct XCLocalization: Codable, Sendable {
     }
 }
 
+/// The actual translated string and its review state.
+/// `state` values recognised by Xcode: `"new"`, `"translated"`, `"needs_review"`.
+/// We write `"translated"` for all machine-translated strings.
 public struct XCStringUnit: Codable, Sendable {
     public var state: String
     public var value: String
@@ -51,18 +62,21 @@ public struct XCStringUnit: Codable, Sendable {
 
 // MARK: - Parser
 
+/// Reads and writes `.xcstrings` files via `JSONDecoder` / `JSONEncoder`.
 public enum XCStringsParser {
+
     public static func parse(from url: URL) throws -> XCStrings {
         let data = try Data(contentsOf: url)
-        let decoder = JSONDecoder()
-        return try decoder.decode(XCStrings.self, from: data)
+        return try JSONDecoder().decode(XCStrings.self, from: data)
     }
 
     public static func write(_ xcstrings: XCStrings, to url: URL) throws {
         let encoder = JSONEncoder()
-        // sortedKeys for stable git diffs; prettyPrinted for human readability
+        // sortedKeys: stable git diffs — prevents key-order churn between runs
+        // prettyPrinted: .xcstrings files are human-reviewed; compact JSON would be hostile
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(xcstrings)
+        // .atomic: write to a temp file then rename — avoids a corrupt .xcstrings if interrupted
         try data.write(to: url, options: .atomic)
     }
 }
