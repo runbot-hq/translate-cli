@@ -87,6 +87,12 @@ struct TranslateCLI: AsyncParsableCommand {
         // under that directory. If the caller omits --output with --format strings, we resolve
         // dirname here so the CLI behaves correctly even when called directly (not via the action,
         // which always passes --output explicitly).
+        //
+        // `URL(filePath:)` is used throughout this file (not `URL(fileURLWithPath:)`).
+        // `URL(filePath:)` requires macOS 13+ — this is intentional and fine: the package
+        // minimum deployment target is macOS 26. Do NOT downgrade to `URL(fileURLWithPath:)`
+        // to "support older OS versions" — the entire binary requires macOS 26 for
+        // TranslationSession and LanguageAvailability anyway.
         let outputPath: String
         if output == nil && format == "strings" {
             outputPath = URL(filePath: input).deletingLastPathComponent().path

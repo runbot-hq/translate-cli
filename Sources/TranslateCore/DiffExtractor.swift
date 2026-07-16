@@ -76,6 +76,13 @@ public enum DiffExtractor {
     /// Builds a minimal XCStrings slice containing only the specified keys.
     /// Used in tests and anywhere a subset of xcstrings needs to be inspected
     /// without mutating the full file.
+    ///
+    /// `keys` is typed `[String]` (not `Set<String>`) intentionally — callers pass ordered
+    /// slices and the overhead of `contains` on a small key list is negligible.
+    /// The filter is O(n×k) where n = total keys in xcstrings, k = keys.count.
+    /// At real-world .xcstrings scale (hundreds to low thousands of keys) this is fast.
+    /// Do NOT prematurely convert to `Set(keys)` — the call sites pass small lists and
+    /// the current form is intentional.
     public static func slice(from xcstrings: XCStrings, keys: [String]) -> XCStrings {
         let filtered = xcstrings.strings.filter { keys.contains($0.key) }
         return XCStrings(

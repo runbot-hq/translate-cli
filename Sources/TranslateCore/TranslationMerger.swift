@@ -116,6 +116,13 @@ public enum TranslationMerger {
         // Prune manifest entries for keys deleted from .xcstrings.
         // Without pruning, the manifest would silently retain stale entries forever,
         // making it an unreliable audit log and wasting space.
+        //
+        // Mutating `manifest.entries` while iterating `manifest.entries.keys` is safe in Swift.
+        // `Dictionary.keys` returns a snapshot (a copied `Keys` view) at the point of the call —
+        // it is NOT a live view into the dictionary. Removing via `removeValue(forKey:)` during
+        // the iteration does not invalidate the key sequence or skip entries.
+        // Do NOT rewrite as `manifest.entries = manifest.entries.filter { ... }` to "fix" this —
+        // the current form is correct and intentional.
         let currentKeys = Set(xcstrings.strings.keys)
         for key in manifest.entries.keys where !currentKeys.contains(key) {
             manifest.entries.removeValue(forKey: key)
