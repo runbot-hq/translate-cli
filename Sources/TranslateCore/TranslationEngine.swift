@@ -164,58 +164,58 @@ public actor TranslationEngine: Translating {
         }
     }
 
-}
+    // MARK: - Batch execution
 
-// MARK: - Batch execution
-
-// runBatch is a FREE FUNCTION, not a method on TranslationEngine. This is intentional.
-//
-// Why not a method? TranslationSession is created inside the actor's `translate()` method
-// (where it is always consumed immediately) and passed into runBatch directly. This keeps
-// TranslationSession entirely within the actor's isolation domain without storing it as a
-// property. A stored-property approach would require explicit lifecycle management
-// (init/deinit, reset between calls) and risks accidentally sharing a session across
-// locales, which is unsafe.
-//
-// The free function signature makes the data flow explicit and auditable:
-// session is always freshly constructed by the actor caller, used once, and discarded.
-// Do NOT refactor this into an instance method or store TranslationSession on the actor.
-private func runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
-    // clientIdentifier echoes the key back in the response, so we can re-associate
-    // translated values with their keys regardless of response ordering.
-    let requests = pairs.map { key, value in
-        TranslationSession.Request(sourceText: value, clientIdentifier: key)
-    }
-    var result: [String: String] = [:]
-    let responses = try await session.translations(from: requests)
-    // Apple does not explicitly guarantee that responses preserve request order or even that
-    // response count must exactly equal request count. We therefore re-associate strictly by
-    // clientIdentifier instead of zipping arrays or trusting positional correspondence.
-    // That makes reordering safe and gives us a single defensive place to detect missing IDs.
-    for response in responses {
-        // clientIdentifier is optional in the Apple API but we always set it above.
-        // A nil here means Apple's framework returned a response without echoing our key back —
-        // that key's translation is silently lost: the merger won't write it and the manifest
-        // won't record it, so subsequent runs will re-translate it forever.
-        // We warn to stderr so the runner log captures it if it ever fires.
-        guard let key = response.clientIdentifier else {
-            fputs("Warning: TranslationSession returned a response with nil clientIdentifier — "
-                + "translation for one key was dropped. "
-                + "This is an Apple framework bug; the key will be retried on the next run.\n", stderr)
-            continue
+    /// Executes a batch translation request against the given session.
+    ///
+    /// Declared as a private method on the actor (not a free function) so that
+    /// `TranslationSession` — which is not `Sendable` — never crosses an isolation
+    /// boundary. As an actor method, `runBatch` runs on the actor's executor and
+    /// receives the session without a concurrency hop, satisfying Swift 6 strict
+    /// concurrency. The previous free-function form passed a non-Sendable value
+    /// across an `await` into a non-isolated context, which is technically unsound
+    /// under strict Swift 6 even though it worked in practice today.
+    ///
+    /// The session is always constructed immediately before this call and discarded
+    /// immediately after — it is never stored on the actor.
+    private func runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
+        // clientIdentifier echoes the key back in the response, so we can re-associate
+        // translated values with their keys regardless of response ordering.
+        let requests = pairs.map { key, value in
+            TranslationSession.Request(sourceText: value, clientIdentifier: key)
         }
-        result[key] = response.targetText
+        var result: [String: String] = [:]
+        let responses = try await session.translations(from: requests)
+        // Apple does not explicitly guarantee that responses preserve request order or even that
+        // response count must exactly equal request count. We therefore re-associate strictly by
+        // clientIdentifier instead of zipping arrays or trusting positional correspondence.
+        // That makes reordering safe and gives us a single defensive place to detect missing IDs.
+        for response in responses {
+            // clientIdentifier is optional in the Apple API but we always set it above.
+            // A nil here means Apple's framework returned a response without echoing our key back —
+            // that key's translation is silently lost: the merger won't write it and the manifest
+            // won't record it, so subsequent runs will re-translate it forever.
+            // We warn to stderr so the runner log captures it if it ever fires.
+            guard let key = response.clientIdentifier else {
+                fputs("Warning: TranslationSession returned a response with nil clientIdentifier — "
+                    + "translation for one key was dropped. "
+                    + "This is an Apple framework bug; the key will be retried on the next run.\n", stderr)
+                continue
+            }
+            result[key] = response.targetText
+        }
+        // Post-loop completeness check: Apple does not guarantee that every request yields
+        // a response. A response can be absent entirely (no entry at all, not just nil ID).
+        // The per-response nil-ID guard above catches corrupt echoes; this catches silent drops.
+        // If result.count < pairs.count, one or more keys were silently lost by the framework.
+        // Those keys will be retried on the next run (manifest won't record them).
+        if result.count < pairs.count {
+            let dropped = pairs.count - result.count
+            fputs("Warning: TranslationSession returned \(dropped) fewer response(s) than requests — "
+                + "\(dropped) key(s) silently dropped by Apple framework. "
+                + "They will be retried on the next run.\n", stderr)
+        }
+        return result
     }
-    // Post-loop completeness check: Apple does not guarantee that every request yields
-    // a response. A response can be absent entirely (no entry at all, not just nil ID).
-    // The per-response nil-ID guard above catches corrupt echoes; this catches silent drops.
-    // If result.count < pairs.count, one or more keys were silently lost by the framework.
-    // Those keys will be retried on the next run (manifest won't record them).
-    if result.count < pairs.count {
-        let dropped = pairs.count - result.count
-        fputs("Warning: TranslationSession returned \(dropped) fewer response(s) than requests — "
-            + "\(dropped) key(s) silently dropped by Apple framework. "
-            + "They will be retried on the next run.\n", stderr)
-    }
-    return result
+
 }
