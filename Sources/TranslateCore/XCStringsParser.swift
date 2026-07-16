@@ -16,6 +16,14 @@ public struct XCStrings: Codable, Sendable {
     public var sourceLanguage: String
     public var strings: [String: XCStringEntry]
 
+    /// - Parameter sourceLanguage: Default is `"en"` for convenience in tests and
+    ///   `DiffExtractor.slice(from:keys:)`, which always passes `xcstrings.sourceLanguage`
+    ///   explicitly from the parsed file value.
+    ///   **All production call sites pass `sourceLanguage` explicitly** — the `"en"` default
+    ///   is never reached in live code paths. Do NOT add a new call site that omits this
+    ///   parameter; always pass the value read from the parsed `.xcstrings` file or the
+    ///   caller-supplied `--source-language` flag. Hardcoding `"en"` at construction time
+    ///   is the exact bug documented in issue #2103 post-ship amendments.
     public init(version: String = "1.0", sourceLanguage: String = "en", strings: [String: XCStringEntry] = [:]) {
         self.version = version
         self.sourceLanguage = sourceLanguage
