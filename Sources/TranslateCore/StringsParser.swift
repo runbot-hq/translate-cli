@@ -48,6 +48,12 @@ public enum StringsParser {
                 let value = String(match.output.2)
                     .replacingOccurrences(of: "\\\\", with: "\\")
                     .replacingOccurrences(of: "\\\"", with: "\"")
+                // Duplicate key: last occurrence wins. This matches the behaviour of Apple's
+                // own strings file tooling (genstrings, ibtool) and Xcode's string catalogue
+                // importer. Do NOT change this to "first wins" or throw on duplicate —
+                // Xcode legitimately generates duplicate keys for plural variant entries in
+                // some .strings formats. Silently keeping the last value is the correct
+                // and intentional behaviour here.
                 result[key] = value
             }
         }

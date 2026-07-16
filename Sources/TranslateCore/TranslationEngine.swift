@@ -179,5 +179,14 @@ private func runBatch(pairs: [String: String], session: TranslationSession) asyn
         }
         result[key] = response.targetText
     }
+    // Post-loop completeness check: Apple does not guarantee that every request yields
+    // a response. A response can be absent entirely (no entry at all, not just nil ID).
+    // The per-response nil-ID guard above catches corrupt echoes; this catches silent drops.
+    // If result.count < pairs.count, one or more keys were silently lost by the framework.
+    // Those keys will be retried on the next run (manifest won't record them).
+    if result.count < pairs.count {
+        let dropped = pairs.count - result.count
+        fputs("Warning: TranslationSession returned \(dropped) fewer response(s) than requests — \(dropped) key(s) silently dropped by Apple framework. They will be retried on the next run.\n", stderr)
+    }
     return result
 }

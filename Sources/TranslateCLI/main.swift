@@ -216,6 +216,13 @@ struct TranslateCLI: AsyncParsableCommand {
         // .strings: one file per locale in {outputDir}/{locale}.lproj/{inputFilename}.strings
         // Writing per-locale into lproj subdirs avoids the overwrite bug where a single
         // output path would be clobbered by each successive locale in the loop.
+        // ⚠️ Atomicity gap: step 7 (write output file) and step 8 (save manifest) are NOT atomic.
+        // If the process is killed between these two steps, the output file will have been
+        // written but the manifest will not reflect the completed locales. On the next run,
+        // DiffExtractor will re-flag all keys (manifest shows them as untranslated) and
+        // re-translate them — producing the same result and overwriting the file again.
+        // This is safe: at worst it wastes one extra translation run. The manifest's
+        // "eventual consistency" model is intentional; it is not a transactional log.
         if format == "xcstrings" {
             try XCStringsParser.write(xcstrings, to: URL(filePath: outputPath))
         } else if format == "strings" {
