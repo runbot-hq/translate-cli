@@ -7,15 +7,24 @@ import Foundation
 /// Translates Markdown or plain text content while preserving code blocks.
 ///
 /// Strategy: split on double-newline paragraph boundaries, classify each paragraph,
-/// skip code blocks, translate prose paragraphs individually.
+/// skip code blocks, batch all translatable prose paragraphs into a single engine
+/// call per locale, then reassemble in original order.
 ///
-/// Paragraph-level translation (rather than full-document) keeps the request size
-/// small and avoids token limits. Each paragraph is translated as a single
-/// `["p": text]` pair — the key `"p"` is arbitrary; it just satisfies the
-/// `TranslationEngine.translate(_:from:to:)` signature which takes `[String: String]`.
+/// Batching all paragraphs as one `[String: String]` dict (key = paragraph index)
+/// uses TranslationEngine's native batch API — one `TranslationSession.translations(from:)`
+/// call per locale rather than one call per paragraph. For a document with N paragraphs
+/// this is N× fewer session round-trips.
+///
+/// ⚠️ Known limitation: fenced code blocks (``` or ~~~) that contain a double-newline
+/// (`\n\n`) inside the fence are split across multiple chunks by `components(separatedBy: "\n\n")`.
+/// Only the first chunk (containing the opening fence marker) is detected and skipped;
+/// subsequent chunks (body/closing) are sent for translation. This is acceptable for
+/// typical release-notes content where code blocks rarely contain blank lines.
+/// Full CommonMark fidelity would require a proper block-level parser.
 public enum MarkdownTranslator {
 
-    /// Translates `text` from `sourceLocale` to `targetLocale` paragraph by paragraph.
+    /// Translates `text` from `sourceLocale` to `targetLocale`.
+    /// All translatable paragraphs are batched into a single engine call.
     /// Code blocks are passed through untouched.
     public static func translate(
         _ text: String,
@@ -24,21 +33,26 @@ public enum MarkdownTranslator {
         using engine: TranslationEngine
     ) async throws -> String {
         let paragraphs = text.components(separatedBy: "\n\n")
-        var translated: [String] = []
 
-        for paragraph in paragraphs {
-            if shouldSkip(paragraph) {
-                // Preserve code blocks, horizontal rules, and other non-prose chunks verbatim
-                translated.append(paragraph)
-            } else {
-                let result = try await engine.translate(
-                    ["p": paragraph],
-                    from: sourceLocale,
-                    to: targetLocale
-                )
-                // Fall back to the original paragraph if the engine returns nothing
-                translated.append(result["p"] ?? paragraph)
+        // Collect translatable paragraphs as index → text, preserving positions of
+        // skipped chunks so reassembly doesn't need a separate pass.
+        var batch: [String: String] = [:]
+        for (i, paragraph) in paragraphs.enumerated() {
+            if !shouldSkip(paragraph) {
+                batch["\(i)"] = paragraph
             }
+        }
+
+        // Single engine call for all prose paragraphs — one TranslationSession round-trip.
+        let results = batch.isEmpty ? [:] : try await engine.translate(
+            batch,
+            from: sourceLocale,
+            to: targetLocale
+        )
+
+        // Reassemble: translated paragraphs replace originals; skipped chunks stay verbatim.
+        let translated = paragraphs.enumerated().map { i, paragraph in
+            results["\(i)"] ?? paragraph   // fall back to original if engine returns nothing
         }
 
         return translated.joined(separator: "\n\n")

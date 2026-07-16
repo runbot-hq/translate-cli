@@ -220,14 +220,21 @@ struct TranslateCLI: AsyncParsableCommand {
 
         // 8. Update manifest — only after all locales are processed so partial-success
         // runs record the correct completed-locales union rather than a premature snapshot.
-        TranslationMerger.updateManifest(
-            &translationManifest,
-            keys: Array(changedKeys.keys),
-            sourceValues: changedKeys,
-            xcstrings: xcstrings,
-            completedLocales: completedLocales
-        )
-        try ManifestHandler.save(translationManifest, to: manifestPath)
+        // Guard: skip manifest write entirely when every locale failed. Writing with an
+        // empty completedLocales array would bump translatedAt timestamps without any
+        // translation having occurred, making the audit log misleading. On the next run,
+        // DiffExtractor will still flag the same keys (no target locale in manifest) and
+        // retranslation will proceed correctly — so skipping here is safe.
+        if !completedLocales.isEmpty {
+            TranslationMerger.updateManifest(
+                &translationManifest,
+                keys: Array(changedKeys.keys),
+                sourceValues: changedKeys,
+                xcstrings: xcstrings,
+                completedLocales: completedLocales
+            )
+            try ManifestHandler.save(translationManifest, to: manifestPath)
+        }
 
         // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
         print("keys_translated=\(changedKeys.count)")
