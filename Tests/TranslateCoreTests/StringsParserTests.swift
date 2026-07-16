@@ -28,6 +28,22 @@ struct StringsParserTests {
         try? FileManager.default.removeItem(at: url)
     }
 
+    /// Verifies that entries with empty values ("key" = "";) are parsed correctly.
+    /// Apple's .strings format allows empty values and they must not be silently dropped.
+    /// The regex value group uses `*` (zero-or-more) for exactly this reason.
+    @Test func parseEmptyValue() throws {
+        let content = """
+        "empty_key" = "";
+        "normal_key" = "Hello";
+        """
+        let url = URL(filePath: NSTemporaryDirectory()).appending(path: "empty_\(UUID().uuidString).strings")
+        try content.write(to: url, atomically: true, encoding: .utf8)
+        let result = try StringsParser.parse(from: url)
+        #expect(result["empty_key"] == "")
+        #expect(result["normal_key"] == "Hello")
+        try? FileManager.default.removeItem(at: url)
+    }
+
     /// Regression test: verifies that values containing both backslashes AND double-quotes
     /// round-trip correctly through write() → parse().
     ///

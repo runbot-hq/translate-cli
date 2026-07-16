@@ -62,7 +62,17 @@ struct TranslateCLI: AsyncParsableCommand {
             throw ExitCode.failure
         }
 
-        let outputPath = output ?? input
+        // outputPath default: for xcstrings and markdown, in-place (== input path) is correct.
+        // For strings format, the correct default is dirname(input) — lproj subdirs are written
+        // under that directory. If the caller omits --output with --format strings, we resolve
+        // dirname here so the CLI behaves correctly even when called directly (not via the action,
+        // which always passes --output explicitly).
+        let outputPath: String
+        if output == nil && format == "strings" {
+            outputPath = URL(filePath: input).deletingLastPathComponent().path
+        } else {
+            outputPath = output ?? input
+        }
         let q: TranslationQuality = quality == "fast" ? .fast : .high
         let engine = TranslationEngine(quality: q)
 

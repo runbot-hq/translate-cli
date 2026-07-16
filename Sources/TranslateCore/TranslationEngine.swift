@@ -47,6 +47,18 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
     }
 }
 
+// MARK: - Translating protocol
+
+/// Abstraction over batch key→value translation. Exists so `MarkdownTranslator`
+/// (and tests) can accept a stub without subclassing the concrete `TranslationEngine` actor.
+public protocol Translating: Actor {
+    func translate(
+        _ pairs: [String: String],
+        from sourceLocale: Locale,
+        to targetLocale: Locale
+    ) async throws -> [String: String]
+}
+
 // MARK: - Engine
 
 /// Wraps Apple's Translation framework for batch key→value translation.
@@ -54,7 +66,7 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
 /// Declared as `actor` to satisfy Swift 6 concurrency requirements on `TranslationSession`
 /// usage — not because concurrent calls are safe. The per-locale loop in main.swift
 /// must remain sequential regardless of this actor wrapper.
-public actor TranslationEngine {
+public actor TranslationEngine: Translating {
     public let quality: TranslationQuality
 
     public init(quality: TranslationQuality = .high) {
@@ -152,9 +164,15 @@ private func runBatch(pairs: [String: String], session: TranslationSession) asyn
     var result: [String: String] = [:]
     let responses = try await session.translations(from: requests)
     for response in responses {
-        // clientIdentifier is optional in the API but we always set it above.
-        // The guard is defensive — a nil identifier would silently drop a translation.
-        guard let key = response.clientIdentifier else { continue }
+        // clientIdentifier is optional in the Apple API but we always set it above.
+        // A nil here means Apple's framework returned a response without echoing our key back —
+        // that key's translation is silently lost: the merger won't write it and the manifest
+        // won't record it, so subsequent runs will re-translate it forever.
+        // We warn to stderr so the runner log captures it if it ever fires.
+        guard let key = response.clientIdentifier else {
+            fputs("Warning: TranslationSession returned a response with nil clientIdentifier — translation for one key was dropped. This is an Apple framework bug; the key will be retried on the next run.\n", stderr)
+            continue
+        }
         result[key] = response.targetText
     }
     return result

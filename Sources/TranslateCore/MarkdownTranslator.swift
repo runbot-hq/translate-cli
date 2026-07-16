@@ -30,7 +30,7 @@ public enum MarkdownTranslator {
         _ text: String,
         from sourceLocale: Locale,
         to targetLocale: Locale,
-        using engine: TranslationEngine
+        using engine: some Translating
     ) async throws -> String {
         let paragraphs = text.components(separatedBy: "\n\n")
 
@@ -42,6 +42,10 @@ public enum MarkdownTranslator {
         // paragraph if TranslationEngine returns duplicate keys.
         var batch: [String: String] = [:]
         for (i, paragraph) in paragraphs.enumerated() {
+            // Skip empty paragraphs (e.g. trailing newlines produce a trailing empty chunk)
+            // and code blocks. Sending an empty string to the engine wastes a round-trip
+            // and returns "" which is indistinguishable from a missing key in the results dict.
+            guard !paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             if !shouldSkip(paragraph) {
                 batch["\(i)"] = paragraph
             }

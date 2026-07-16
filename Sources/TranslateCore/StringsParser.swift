@@ -19,10 +19,14 @@ public enum StringsParser {
     // with static stored Regex values — not a data race.
     // See: https://forums.swift.org/t/regex-sendable/64573
     //
-    // Pattern matches:  "key" = "value";
+    // Pattern matches:  "key" = "value"; and "key" = ""; (empty values)
     // Handles:          escaped quotes (\") and backslashes inside keys/values.
     // Does NOT match:   block-comment lines (stripped before regex) or line-comment lines (skipped below).
-    nonisolated(unsafe) private static let linePattern = #/^\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)+)"\s*;/#
+    //
+    // Quantifier is `*` (zero or more), NOT `+` (one or more). Using `+` would silently skip
+    // entries with empty values (e.g. "key" = "";) which are valid in Apple's .strings format.
+    // Keys are still required to be non-empty (key group uses `+`).
+    nonisolated(unsafe) private static let linePattern = #/^\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/#
 
     /// Parses a `.strings` file and returns a `[key: value]` dictionary.
     /// Block comments (`/* ... */`) are stripped before line matching.
