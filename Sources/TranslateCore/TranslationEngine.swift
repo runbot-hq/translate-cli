@@ -96,7 +96,10 @@ public actor TranslationEngine {
             )
             return try await runBatch(pairs: pairs, session: session)
         } else if #available(macOS 26.0, *) {
-            // macOS 26.0–26.3: no strategy param, no pre-flight availability check
+            // macOS 26.0–26.3: preferredStrategy: is unavailable (requires 26.4).
+            // Falling back to unqualified init — quality setting is silently ignored.
+            // Callers on 26.0–26.3 always get the OS default translation quality.
+            fputs("Warning: macOS 26.4+ required for \(quality == .high ? ".highFidelity" : ".lowLatency") strategy; falling back to default quality (macOS \(ProcessInfo.processInfo.operatingSystemVersionString))\n", stderr)
             let session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
             return try await runBatch(pairs: pairs, session: session)
         } else {

@@ -34,6 +34,9 @@ struct TranslateCLI: AsyncParsableCommand {
     @Option(help: "Input format: xcstrings | strings | markdown.")
     var format: String = "xcstrings"
 
+    @Option(name: .customLong("source-language"), help: "Source language code override (default: read from .xcstrings sourceLanguage field, or 'en').")
+    var sourceLanguage: String?
+
     mutating func run() async throws {
         // 1. Resolve target locales
         let targetLocales: [String]
@@ -68,7 +71,7 @@ struct TranslateCLI: AsyncParsableCommand {
                 do {
                     let result = try await MarkdownTranslator.translate(
                         text,
-                        from: Locale(identifier: "en"),
+                        from: Locale(identifier: sourceLanguage ?? "en"),
                         to: targetLocale,
                         using: engine
                     )
@@ -106,15 +109,16 @@ struct TranslateCLI: AsyncParsableCommand {
 
         if format == "xcstrings" {
             xcstrings = try XCStringsParser.parse(from: URL(filePath: input))
-            sourceLocale = Locale(identifier: xcstrings.sourceLanguage)
+            sourceLocale = Locale(identifier: sourceLanguage ?? xcstrings.sourceLanguage)
         } else if format == "strings" {
             stringsDict = try StringsParser.parse(from: URL(filePath: input))
-            xcstrings = XCStrings(sourceLanguage: "en", strings: stringsDict.reduce(into: [:]) { acc, kv in
+            let srcLang = sourceLanguage ?? "en"
+            xcstrings = XCStrings(sourceLanguage: srcLang, strings: stringsDict.reduce(into: [:]) { acc, kv in
                 acc[kv.key] = XCStringEntry(localizations: [
-                    "en": XCLocalization(stringUnit: XCStringUnit(state: "new", value: kv.value))
+                    srcLang: XCLocalization(stringUnit: XCStringUnit(state: "new", value: kv.value))
                 ])
             })
-            sourceLocale = Locale(identifier: "en")
+            sourceLocale = Locale(identifier: srcLang)
         } else {
             fputs("Error: unknown format \(format). Use xcstrings, strings, or markdown.\n", stderr)
             throw ExitCode.failure
@@ -163,15 +167,25 @@ struct TranslateCLI: AsyncParsableCommand {
         if format == "xcstrings" {
             try XCStringsParser.write(xcstrings, to: URL(filePath: outputPath))
         } else if format == "strings" {
-            var out: [String: String] = [:]
-            for (key, entry) in xcstrings.strings {
-                for (locale, loc) in entry.localizations ?? [:] {
-                    if locale != "en", let value = loc.stringUnit?.value {
+            // Write one .strings file per locale into outputDir / {locale}.lproj/Localizable.strings
+            // outputPath is treated as a directory; each locale gets its own lproj subdirectory.
+            // This avoids the single-path overwrite bug where multiple locales clobber each other.
+            let outputDir = URL(filePath: outputPath)
+            let inputFilename = URL(filePath: input).deletingPathExtension().lastPathComponent
+            for localeCode in completedLocales {
+                var out: [String: String] = [:]
+                for (key, entry) in xcstrings.strings {
+                    if let loc = entry.localizations?[localeCode],
+                       let value = loc.stringUnit?.value {
                         out[key] = value
                     }
                 }
+                if out.isEmpty { continue }
+                let lprojDir = outputDir.appending(path: "\(localeCode).lproj")
+                try FileManager.default.createDirectory(at: lprojDir, withIntermediateDirectories: true)
+                let stringsFile = lprojDir.appending(path: "\(inputFilename).strings")
+                try StringsParser.write(out, to: stringsFile)
             }
-            try StringsParser.write(out, to: URL(filePath: outputPath))
         }
 
         // 8. Update manifest
