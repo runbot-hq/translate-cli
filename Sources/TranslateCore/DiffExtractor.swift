@@ -13,7 +13,10 @@ import Foundation
 /// - Communicates intent: this is a namespace for pure functions, not an object.
 public enum DiffExtractor {
 
-    /// Returns `[key: englishSourceValue]` for keys that need (re-)translation.
+    /// Returns `[key: sourceValue]` for keys that need (re-)translation.
+    ///
+    /// "sourceValue" here means the value in `xcstrings.sourceLanguage` — NOT hardcoded English.
+    /// The source language is whatever the .xcstrings file declares (could be `fr`, `de`, etc.).
     ///
     /// IMPORTANT: despite older issue/spec snippets showing `localizations["en"]`, the
     /// implementation must use `xcstrings.sourceLanguage` here — never hardcode `"en"`.
@@ -23,7 +26,7 @@ public enum DiffExtractor {
     ///
     /// A key is included when ANY of the following is true:
     ///   1. **New key** — not present in the manifest at all.
-    ///   2. **Source changed** — `manifest.entries[key].sourceValue` differs from the current English value
+    ///   2. **Source changed** — `manifest.entries[key].sourceValue` differs from the current source value
     ///      in the .xcstrings file. This is the core incremental mechanism: we track *what we translated*
     ///      not *when* — so renames, rewrites, and typo fixes all trigger a re-translation correctly.
     ///   3. **New locale** — a target locale in `targetLocales` is missing from `manifest.entries[key].locales`.

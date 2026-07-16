@@ -142,12 +142,12 @@ public actor TranslationEngine: Translating {
                 )
             }
 
-            let session = TranslationSession(
-                installedSource: sourceLanguage,
+            return try await runBatch(
+                pairs: pairs,
+                source: sourceLanguage,
                 target: targetLanguage,
-                preferredStrategy: strategy
+                strategy: strategy
             )
-            return try await runBatch(pairs: pairs, session: session)
         } else if #available(macOS 26.0, *) {
             // macOS 26.0–26.3: preferredStrategy: does not exist — unavailable API, not a bug.
             // We deliberately fall back to the unqualified init and warn via stderr.
@@ -168,8 +168,7 @@ public actor TranslationEngine: Translating {
             let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
             fputs("Warning: macOS 26.4+ required for \(strategyName) strategy; "
                 + "falling back to default quality (macOS \(osVersion))\n", stderr)
-            let session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
-            return try await runBatch(pairs: pairs, session: session)
+            return try await runBatch(pairs: pairs, source: sourceLanguage, target: targetLanguage)
         } else {
             throw TranslationEngineError.requiresmacOS26("Translation framework")
         }
@@ -177,19 +176,46 @@ public actor TranslationEngine: Translating {
 
     // MARK: - Batch execution
 
-    /// Executes a batch translation request against the given session.
+    /// Executes a batch translation request by creating and immediately consuming a
+    /// `TranslationSession` within a `nonisolated` context.
     ///
-    /// Declared as a private method on the actor (not a free function) so that
-    /// `TranslationSession` — which is not `Sendable` — never crosses an isolation
-    /// boundary. As an actor method, `runBatch` runs on the actor's executor and
-    /// receives the session without a concurrency hop, satisfying Swift 6 strict
-    /// concurrency. The previous free-function form passed a non-Sendable value
-    /// across an `await` into a non-isolated context, which is technically unsound
-    /// under strict Swift 6 even though it worked in practice today.
+    /// `nonisolated` is the key constraint here: by making this method nonisolated,
+    /// `session` is created and used entirely outside actor isolation. This means
+    /// `session` is never an actor-isolated value, so calling Apple's `nonisolated`
+    /// `translations(from:)` on it never triggers Swift 6's "sending actor-isolated
+    /// value to nonisolated context" diagnostic.
     ///
-    /// The session is always constructed immediately before this call and discarded
-    /// immediately after — it is never stored on the actor.
-    private func runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
+    /// Previous form passed a pre-constructed `TranslationSession` into an actor method,
+    /// which made the session actor-isolated; calling `translations(from:)` (nonisolated
+    /// Apple API) on it then crossed the isolation boundary and produced the Swift 6 error:
+    ///   "sending 'self'-isolated 'session' to nonisolated instance method risks data races"
+    ///
+    /// The session is always created immediately before use and discarded immediately after
+    /// — it is never stored anywhere and never shared across calls.
+    @available(macOS 26.4, *)
+    private nonisolated func runBatch(
+        pairs: [String: String],
+        source: Locale.Language,
+        target: Locale.Language,
+        strategy: TranslationSession.Strategy
+    ) async throws -> [String: String] {
+        let session = TranslationSession(installedSource: source, target: target, preferredStrategy: strategy)
+        return try await _runBatch(pairs: pairs, session: session)
+    }
+
+    @available(macOS 26.0, *)
+    private nonisolated func runBatch(
+        pairs: [String: String],
+        source: Locale.Language,
+        target: Locale.Language
+    ) async throws -> [String: String] {
+        let session = TranslationSession(installedSource: source, target: target)
+        return try await _runBatch(pairs: pairs, session: session)
+    }
+
+    /// Core batch execution — shared by both `runBatch` overloads.
+    /// Called from `nonisolated` context so `session` is never actor-isolated.
+    private nonisolated func _runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
         // clientIdentifier echoes the key back in the response, so we can re-associate
         // translated values with their keys regardless of response ordering.
         let requests = pairs.map { key, value in

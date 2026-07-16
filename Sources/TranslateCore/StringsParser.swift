@@ -29,10 +29,12 @@ public enum StringsParser {
     // Keys are still required to be non-empty (key group uses `+`).
     //
     // Limitation: the parser is line-by-line (`components(separatedBy: "\n")` below).
-    // Values with literal embedded newlines spanning multiple file lines would be silently
+    // Values with *literal* embedded newlines spanning multiple file lines would be silently
     // dropped. In practice Apple tooling always writes `\n` escape sequences on a single line,
-    // so this is not a real-world concern. If this parser is ever generalised to handle
-    // hand-authored or non-Apple-generated .strings files, add multi-line value support.
+    // so this is not a real-world concern for Apple-generated files.
+    // Note: `\n`, `\t`, and `\r` *escape sequences* (two chars: backslash + letter) ARE
+    // unescaped during parse and re-escaped during write, so hand-authored .strings files
+    // using these sequences round-trip correctly. Only literal multi-line values are unsupported.
     nonisolated(unsafe) private static let linePattern = #/^\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/#
 
     /// Parses a `.strings` file and returns a `[key: value]` dictionary.
@@ -49,12 +51,24 @@ public enum StringsParser {
             if trimmed.hasPrefix("//") { continue }   // skip line comments
             if let match = try? linePattern.firstMatch(in: line) {
                 // Unescape \" → " and \\ → \ (order matters: unescape \\ first)
+                // Unescape order: \\ → \ first (so \\n doesn't become \n), then \" → ", then \n/\t/\r.
+                // Handles hand-authored .strings files with standard escape sequences.
+                // Apple tooling always writes \n on a single line rather than literal newlines,
+                // so not unescaping \n was safe for Apple-generated files — but hand-authored
+                // source files can legitimately contain \n, \t, \r and would be corrupted
+                // (double-escaped on write) without this unescaping step.
                 let key = String(match.output.1)
                     .replacingOccurrences(of: "\\\\", with: "\\")
                     .replacingOccurrences(of: "\\\"", with: "\"")
+                    .replacingOccurrences(of: "\\n", with: "\n")
+                    .replacingOccurrences(of: "\\t", with: "\t")
+                    .replacingOccurrences(of: "\\r", with: "\r")
                 let value = String(match.output.2)
                     .replacingOccurrences(of: "\\\\", with: "\\")
                     .replacingOccurrences(of: "\\\"", with: "\"")
+                    .replacingOccurrences(of: "\\n", with: "\n")
+                    .replacingOccurrences(of: "\\t", with: "\t")
+                    .replacingOccurrences(of: "\\r", with: "\r")
                 // Duplicate key: last occurrence wins. This matches the behaviour of Apple's
                 // own strings file tooling (genstrings, ibtool) and Xcode's string catalogue
                 // importer. Do NOT change this to "first wins" or throw on duplicate —
@@ -77,12 +91,20 @@ public enum StringsParser {
             // confirmed present in the dict, so nil here is impossible in practice, but
             // compactMap + guard is safer under refactor than `strings[key]!`.
             guard let rawValue = strings[key] else { return nil }
+            // Escape order: \ → \\ first (must precede all others), then " → \", then \n/\t/\r.
+            // Mirrors the unescape order in parse() to guarantee round-trip fidelity.
             let escapedKey = key
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\t", with: "\\t")
+                .replacingOccurrences(of: "\r", with: "\\r")
             let escapedValue = rawValue
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
+                .replacingOccurrences(of: "\n", with: "\\n")
+                .replacingOccurrences(of: "\t", with: "\\t")
+                .replacingOccurrences(of: "\r", with: "\\r")
             return "\"\(escapedKey)\" = \"\(escapedValue)\";"
         }
         let content = lines.joined(separator: "\n") + "\n"

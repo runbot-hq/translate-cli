@@ -28,12 +28,10 @@ struct TranslateCLI: AsyncParsableCommand {
     @Option(help: "Path to localization.config.json — CLI reads targetLanguages directly from this file.")
     var config: String?
 
-    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. "
-        + "Takes precedence over --config if both are provided.")
+    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. Takes precedence over --config if both are provided.")
     var languages: String?
 
-    @Option(help: "Translation quality: high (Apple Intelligence / highFidelity, requires macOS 26.4+) "
-        + "or fast (lowLatency NMT).")
+    @Option(help: "Translation quality: high (Apple Intelligence / highFidelity, requires macOS 26.4+) or fast (lowLatency NMT).")
     var quality: String = "high"
 
     @Option(help: "Input format: xcstrings | strings | markdown.")
@@ -42,8 +40,11 @@ struct TranslateCLI: AsyncParsableCommand {
     // --source-language overrides the sourceLanguage field read from the .xcstrings file.
     // Required when translating .strings files (which have no embedded source language)
     // and when the .xcstrings sourceLanguage field does not match the actual source.
+    // Default behaviour by format:
+    //   xcstrings / markdown — reads sourceLanguage from the .xcstrings file; NO 'en' fallback.
+    //   strings             — defaults to 'en' (no embedded source language in .strings files).
     @Option(name: .customLong("source-language"),
-        help: "Source language code override (default: read from .xcstrings sourceLanguage field, or 'en').")
+        help: "Source language override. xcstrings/markdown: reads from .xcstrings file (no 'en' fallback). strings: defaults to 'en'. Set explicitly only when the .xcstrings sourceLanguage is wrong or for non-English .strings sources.")
     var sourceLanguage: String?
 
     mutating func run() async throws {
@@ -210,24 +211,40 @@ struct TranslateCLI: AsyncParsableCommand {
         // If killed between them the next run will re-translate — safe by design.
         // Guard: skip entirely when every locale failed — no point writing unmodified xcstrings
         // back to disk and bumping the file's mtime on a fully-failed run.
+        //
+        // writeOutput returns only the locales that were actually written to disk.
+        // For xcstrings format this equals completedLocales (one file, all locales merged).
+        // For strings format a locale can be dropped if all its translated values were empty
+        // (degenerate Apple framework response). Those locales are moved to failedLocales so
+        // the manifest does NOT record them as done — they will be retried on the next run.
+        var writtenLocales: [String] = []
+        var effectiveFailed = failedLocales
         if !completedLocales.isEmpty {
-            try writeOutput(xcstrings: xcstrings, completedLocales: completedLocales, outputPath: outputPath)
+            writtenLocales = try writeOutput(
+                xcstrings: xcstrings,
+                completedLocales: completedLocales,
+                outputPath: outputPath
+            )
+            // Any locale engine.translate() succeeded for but writeOutput dropped (all-empty
+            // translations) must be treated as failed so the manifest doesn't permanently
+            // record it as complete with nothing written to disk.
+            let emptySkipped = Set(completedLocales).subtracting(writtenLocales)
+            if !emptySkipped.isEmpty {
+                effectiveFailed += Array(emptySkipped).sorted()
+            }
         }
 
         // 8. Update manifest — only after all locales are processed so partial-success
         // runs record the correct completed-locales union rather than a premature snapshot.
-        // Guard: skip manifest write entirely when every locale failed. Writing with an
-        // empty completedLocales array would bump translatedAt timestamps without any
-        // translation having occurred, making the audit log misleading. On the next run,
-        // DiffExtractor will still flag the same keys (no target locale in manifest) and
-        // retranslation will proceed correctly — so skipping here is safe.
-        if !completedLocales.isEmpty {
+        // Use writtenLocales (not completedLocales) so only locales with real on-disk output
+        // are recorded. Guard: skip manifest write entirely when nothing was written.
+        if !writtenLocales.isEmpty {
             TranslationMerger.updateManifest(
                 &translationManifest,
                 keys: Array(changedKeys.keys),
                 sourceValues: changedKeys,
                 xcstrings: xcstrings,
-                completedLocales: completedLocales
+                completedLocales: writtenLocales
             )
             try ManifestHandler.save(translationManifest, to: manifestPath)
         }
@@ -241,15 +258,15 @@ struct TranslateCLI: AsyncParsableCommand {
         // count; that information is fully represented by languages_failed.
         //
         // The authoritative post-run result is:
-        //   languages_completed — locales that were written and committed
-        //   languages_failed    — locales that errored; will be retried on next run
+        //   languages_completed — locales written to disk and recorded in manifest
+        //   languages_failed    — locales that errored OR had all-empty output; retried next run
         //
         // Callers must gate commit/PR steps on languages_completed being non-empty,
         // NOT on keys_translated being > 0 (which can be true even if every locale failed).
         // This design is documented in issue #2103 §output-contract.
         print("keys_translated=\(changedKeys.count)")
-        print("languages_completed=\(completedLocales.joined(separator: ","))")
-        print("languages_failed=\(failedLocales.joined(separator: ","))")
+        print("languages_completed=\(writtenLocales.joined(separator: ","))")
+        print("languages_failed=\(effectiveFailed.joined(separator: ","))")
     }
 
     // MARK: - Translation loop
@@ -322,16 +339,26 @@ struct TranslateCLI: AsyncParsableCommand {
     /// For `strings` format one file is written per completed locale under
     /// `{outputPath}/{locale}.lproj/{inputFilename}.strings` to avoid the overwrite
     /// bug where successive locales would clobber a single output path.
+    ///
+    /// - Returns: The locales that were actually written to disk. For `xcstrings` format
+    ///   this equals `completedLocales` (all locales are merged into one file). For `strings`
+    ///   format a locale may be omitted if all its translated values were empty (degenerate
+    ///   Apple framework response) — the caller must treat omitted locales as failed so the
+    ///   manifest does not permanently record them as complete with nothing written.
+    @discardableResult
     private func writeOutput(
         xcstrings: XCStrings,
         completedLocales: [String],
         outputPath: String
-    ) throws {
+    ) throws -> [String] {
         if format == "xcstrings" {
             try XCStringsParser.write(xcstrings, to: URL(filePath: outputPath))
+            // xcstrings is one merged file — all completedLocales are written together.
+            return completedLocales
         } else if format == "strings" {
             let outputDir = URL(filePath: outputPath)
             let inputFilename = URL(filePath: input).deletingPathExtension().lastPathComponent
+            var written: [String] = []
             for localeCode in completedLocales {
                 var out: [String: String] = [:]
                 for (key, entry) in xcstrings.strings {
@@ -342,20 +369,22 @@ struct TranslateCLI: AsyncParsableCommand {
                 }
                 if out.isEmpty {
                     // Engine returned all-empty translated values for this locale — degenerate
-                    // framework response. Skip writing but warn so the runner log captures it.
-                    // The locale is already in completedLocales so the manifest records it;
-                    // if the empty translations persist on the next run DiffExtractor will
-                    // not re-queue these keys (manifest has the locale). This is an Apple
-                    // framework anomaly, not a bug in this code.
+                    // Apple framework response. Skip writing and do NOT add to `written`.
+                    // The caller (runStructured) detects the omission and moves this locale
+                    // to effectiveFailed, so the manifest will NOT record it as complete.
+                    // On the next run DiffExtractor will re-queue these keys for this locale.
                     fputs("Warning: all translated values were empty for locale '\(localeCode)' "
-                        + "— skipping .strings write for this locale.\n", stderr)
+                        + "— skipping .strings write; locale will be retried on next run.\n", stderr)
                     continue
                 }
                 let lprojDir = outputDir.appending(path: "\(localeCode).lproj")
                 try FileManager.default.createDirectory(at: lprojDir, withIntermediateDirectories: true)
                 let stringsFile = lprojDir.appending(path: "\(inputFilename).strings")
                 try StringsParser.write(out, to: stringsFile)
+                written.append(localeCode)
             }
+            return written
         }
+        return []
     }
 }
