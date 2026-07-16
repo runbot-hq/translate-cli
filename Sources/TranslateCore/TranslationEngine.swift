@@ -232,7 +232,10 @@ public actor TranslationEngine: Translating {
 
     /// Core batch execution — shared by both `runBatch` overloads.
     /// Called from `nonisolated` context so `session` is never actor-isolated.
-    private nonisolated func _runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
+    private nonisolated func _runBatch(
+        pairs: [String: String],
+        session: TranslationSession
+    ) async throws -> [String: String] {
         // clientIdentifier echoes the key back in the response, so we can re-associate
         // translated values with their keys regardless of response ordering.
         let requests = pairs.map { key, value in

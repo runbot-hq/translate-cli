@@ -28,10 +28,10 @@ struct TranslateCLI: AsyncParsableCommand {
     @Option(help: "Path to localization.config.json — CLI reads targetLanguages directly from this file.")
     var config: String?
 
-    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. Takes precedence over --config if both are provided.")
+    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. Takes precedence over --config.")
     var languages: String?
 
-    @Option(help: "Translation quality: high (Apple Intelligence / highFidelity, requires macOS 26.4+) or fast (lowLatency NMT).")
+    @Option(help: "Translation quality: high (highFidelity, requires macOS 26.4+) or fast (lowLatency NMT).")
     var quality: String = "high"
 
     @Option(help: "Input format: xcstrings | strings | markdown.")
@@ -44,7 +44,11 @@ struct TranslateCLI: AsyncParsableCommand {
     //   xcstrings / markdown — reads sourceLanguage from the .xcstrings file; NO 'en' fallback.
     //   strings             — defaults to 'en' (no embedded source language in .strings files).
     @Option(name: .customLong("source-language"),
-        help: "Source language override. xcstrings/markdown: reads from .xcstrings file (no 'en' fallback). strings: defaults to 'en'. Set explicitly only when the .xcstrings sourceLanguage is wrong or for non-English .strings sources.")
+        help: """
+        Source language override. xcstrings/markdown: reads from .xcstrings file \
+        (no 'en' fallback). strings: defaults to 'en'. Set explicitly only when \
+        the .xcstrings sourceLanguage is wrong or for non-English .strings sources.
+        """)
     var sourceLanguage: String?
 
     mutating func run() async throws {
@@ -166,18 +170,8 @@ struct TranslateCLI: AsyncParsableCommand {
         outputPath: String,
         engine: TranslationEngine
     ) async throws {
-        // 3. Resolve manifest path.
-        // Default: dirname(input)/.translation-manifest.json — always co-located with the
-        // .xcstrings file so it's committed to the repo in the natural place.
-        // --manifest overrides this for non-standard repo layouts.
-        let manifestPath: String
-        if let manifestOverride = manifest {
-            manifestPath = manifestOverride
-        } else {
-            let inputURL = URL(filePath: input)
-            manifestPath = inputURL.deletingLastPathComponent()
-                .appending(path: ".translation-manifest.json").path
-        }
+        // 3–4. Resolve manifest path and load source file.
+        let manifestPath = resolveManifestPath()
 
         // 4. Load source file (format-specific parsing extracted to loadSource).
         // FUTURE: Both loadSource and writeOutput must be updated together when adding formats.
@@ -260,25 +254,12 @@ struct TranslateCLI: AsyncParsableCommand {
             try ManifestHandler.save(translationManifest, to: manifestPath)
         }
 
-        // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
-        //
-        // keys_translated = changedKeys.count (keys that needed translation, pre-flight diff).
-        // This is intentionally NOT "keys that succeeded per locale" and NOT
-        // "keys × locales" — it is the number of source strings that had changes, computed
-        // once before the translation loop. A partial or total locale failure does NOT
-        // reduce this count; that information is fully represented by languages_failed.
-        //
-        // ⚠️ keys_translated > 0 does NOT mean any output was written.
-        // If every locale fails, keys_translated is still changedKeys.count and
-        // languages_completed is empty. Do NOT gate commit/PR steps on keys_translated.
-        //
-        // The authoritative post-run result is:
-        //   languages_completed — locales written to disk and recorded in manifest
-        //   languages_failed    — locales that errored OR had all-empty output; retried next run
-        //
-        // Correct caller gate:  `languages_completed != ''`
-        // Wrong caller gate:    `keys_translated > 0`   ← true even when nothing was written
-        // This design is documented in issue #2103 §output-contract.
+        // 9. Stdout output — parsed by the TypeScript action's parseOutput().
+        // keys_translated = changedKeys.count (pre-flight diff; NOT keys×locales, NOT
+        // "keys that succeeded"). Partial/total locale failure does NOT reduce this count.
+        // ⚠️ Do NOT gate commit steps on keys_translated > 0 — it is non-zero even when every
+        // locale failed and nothing was written. Correct gate: `languages_completed != ''`.
+        // Full contract: issue #2103 §output-contract.
         print("keys_translated=\(changedKeys.count)")
         print("languages_completed=\(writtenLocales.joined(separator: ","))")
         print("languages_failed=\(effectiveFailed.joined(separator: ","))")
@@ -318,6 +299,16 @@ struct TranslateCLI: AsyncParsableCommand {
 
     // MARK: - Source loading
 
+    /// Resolves the manifest path: `--manifest` override when set, otherwise
+    /// `.translation-manifest.json` co-located with the input file.
+    private func resolveManifestPath() -> String {
+        if let manifestOverride = manifest { return manifestOverride }
+        return URL(filePath: input)
+            .deletingLastPathComponent()
+            .appending(path: ".translation-manifest.json")
+            .path
+    }
+
     /// Parses the input file into an XCStrings value and resolves the source locale.
     /// Supports `xcstrings` and `strings` formats.
     ///
@@ -355,13 +346,12 @@ struct TranslateCLI: AsyncParsableCommand {
     /// `{outputPath}/{locale}.lproj/{inputFilename}.strings` to avoid the overwrite
     /// bug where successive locales would clobber a single output path.
     ///
-    /// - Returns: The locales that were actually written to disk. For `xcstrings` format
-    ///   this equals `completedLocales` (all locales are merged into one file). For `strings`
-    ///   format a locale may be omitted if all its translated values were empty (degenerate
-    ///   Apple framework response) — the caller must treat omitted locales as failed so the
-    ///   manifest does not permanently record them as complete with nothing written.
-    // Return value is load-bearing: writtenLocales drives manifest recording and effectiveFailed
-    // (see runStructured). Always capture the return value at every call site.
+    /// - Returns: The locales actually written to disk. For `xcstrings` this equals
+    ///   `completedLocales` (all locales in one file). For `strings` a locale may be
+    ///   omitted when all its translated values were empty (degenerate Apple framework
+    ///   response) — caller must treat omitted locales as failed so the manifest does
+    ///   not permanently record them as complete with nothing written to disk.
+    ///   Return value is load-bearing: always capture it at every call site.
     private func writeOutput(
         xcstrings: XCStrings,
         completedLocales: [String],
