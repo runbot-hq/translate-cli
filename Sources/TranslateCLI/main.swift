@@ -146,6 +146,15 @@ struct TranslateCLI: AsyncParsableCommand {
         } else if format == "strings" {
             stringsDict = try StringsParser.parse(from: URL(filePath: input))
             let srcLang = sourceLanguage ?? "en"
+            // .strings files have NO embedded source-language field, unlike .xcstrings.
+            // Defaulting to "en" here is therefore intentional and correct for the legacy
+            // .strings path only. Do NOT cargo-cult the .xcstrings behaviour here:
+            // there is no file metadata to read from.
+            //
+            // This differs from the action's `source_language` default for .xcstrings, which
+            // must remain empty-string so translate-cli reads xcstrings.sourceLanguage from file.
+            // Reviewers often conflate these two cases; they are different on purpose.
+            //
             // Wrap flat [key: value] dict in XCStrings so the diff/merge pipeline is format-agnostic
             xcstrings = XCStrings(sourceLanguage: srcLang, strings: stringsDict.reduce(into: [:]) { acc, kv in
                 acc[kv.key] = XCStringEntry(localizations: [
@@ -211,6 +220,10 @@ struct TranslateCLI: AsyncParsableCommand {
             try XCStringsParser.write(xcstrings, to: URL(filePath: outputPath))
         } else if format == "strings" {
             let outputDir = URL(filePath: outputPath)
+            // outputDir is a DIRECTORY, not a file path. For strings format we always write
+            // one file per locale under {outputDir}/{locale}.lproj/{inputFilename}.strings.
+            // Do NOT "simplify" this to write directly to outputPath — that reintroduces the
+            // overwrite bug where each locale clobbers the previous one.
             let inputFilename = URL(filePath: input).deletingPathExtension().lastPathComponent
             for localeCode in completedLocales {
                 var out: [String: String] = [:]
@@ -249,10 +262,17 @@ struct TranslateCLI: AsyncParsableCommand {
         // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
         //
         // keys_translated = changedKeys.count (keys that needed translation, pre-flight diff).
-        // This is intentionally NOT "keys that succeeded per locale" — partial locale failures
-        // do not reduce the count. The authoritative per-locale success/failure signal is
-        // languages_completed / languages_failed. Callers should gate commits on
-        // languages_completed being non-empty, not on keys_translated alone.
+        // This is intentionally NOT "keys that succeeded per locale" and NOT
+        // "keys × locales" — it is the number of source strings that had changes, computed
+        // once before the translation loop. A partial locale failure does not reduce this
+        // count; that information is fully represented by languages_failed.
+        //
+        // The authoritative post-run result is:
+        //   languages_completed — locales that were written and committed
+        //   languages_failed    — locales that errored; will be retried on next run
+        //
+        // Callers must gate commit/PR steps on languages_completed being non-empty,
+        // NOT on keys_translated being > 0 (which can be true even if every locale failed).
         // This design is documented in issue #2103 §output-contract.
         print("keys_translated=\(changedKeys.count)")
         print("languages_completed=\(completedLocales.joined(separator: ","))")

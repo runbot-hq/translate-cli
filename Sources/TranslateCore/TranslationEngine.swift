@@ -163,6 +163,10 @@ private func runBatch(pairs: [String: String], session: TranslationSession) asyn
     }
     var result: [String: String] = [:]
     let responses = try await session.translations(from: requests)
+    // Apple does not explicitly guarantee that responses preserve request order or even that
+    // response count must exactly equal request count. We therefore re-associate strictly by
+    // clientIdentifier instead of zipping arrays or trusting positional correspondence.
+    // That makes reordering safe and gives us a single defensive place to detect missing IDs.
     for response in responses {
         // clientIdentifier is optional in the Apple API but we always set it above.
         // A nil here means Apple's framework returned a response without echoing our key back —

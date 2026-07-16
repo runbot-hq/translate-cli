@@ -73,12 +73,23 @@ public enum MarkdownTranslator {
     /// Returns `true` for chunks that must not be translated.
     ///
     /// Skipped patterns:
-    /// - **Fenced code blocks:** paragraph starts with ``` or ~~~
+    /// - **Fenced code blocks:** paragraph (chunk) starts with ``` or ~~~
     /// - **4-space indented blocks:** every non-empty line starts with 4 spaces
     ///
-    /// Note: inline code spans (backtick-wrapped text inside prose) are NOT skipped here.
-    /// Apple's Translation framework treats inline code gracefully — it preserves
-    /// backtick-wrapped spans and does not translate their contents.
+    /// NOT skipped — these are intentional design decisions:
+    /// - **Inline code spans** (`` `code` `` inside prose): Apple’s framework preserves
+    ///   backtick-wrapped spans and does not translate their contents, so we leave them.
+    /// - **Headings / bullet points / blockquotes**: these contain prose that should be
+    ///   translated. Do NOT add hasPrefix("#"), hasPrefix("-"), or hasPrefix(">") guards
+    ///   here — those lines contain human-readable text.
+    /// - **HTML comments / front matter**: out of scope for v1. Only add if you have a
+    ///   concrete use case and a test to cover it.
+    ///
+    /// ⚠️ Chunk granularity: `shouldSkip` operates on double-newline-separated chunks,
+    /// NOT individual lines. A fenced block with a blank line inside will be split into
+    /// multiple chunks; only the opening chunk is skipped. This is the documented
+    /// limitation in the file header above — do not paper over it here with line-level
+    /// logic without replacing the whole splitting strategy.
     private static func shouldSkip(_ chunk: String) -> Bool {
         let trimmed = chunk.trimmingCharacters(in: .newlines)
         if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
