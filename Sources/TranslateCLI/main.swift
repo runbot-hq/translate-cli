@@ -237,6 +237,13 @@ struct TranslateCLI: AsyncParsableCommand {
         }
 
         // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
+        //
+        // keys_translated = changedKeys.count (keys that needed translation, pre-flight diff).
+        // This is intentionally NOT "keys that succeeded per locale" — partial locale failures
+        // do not reduce the count. The authoritative per-locale success/failure signal is
+        // languages_completed / languages_failed. Callers should gate commits on
+        // languages_completed being non-empty, not on keys_translated alone.
+        // This design is documented in issue #2103 §output-contract.
         print("keys_translated=\(changedKeys.count)")
         print("languages_completed=\(completedLocales.joined(separator: ","))")
         print("languages_failed=\(failedLocales.joined(separator: ","))")

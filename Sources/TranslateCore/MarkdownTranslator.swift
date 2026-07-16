@@ -34,8 +34,12 @@ public enum MarkdownTranslator {
     ) async throws -> String {
         let paragraphs = text.components(separatedBy: "\n\n")
 
-        // Collect translatable paragraphs as index → text, preserving positions of
-        // skipped chunks so reassembly doesn't need a separate pass.
+        // Build a batch dict keyed by paragraph index ("0", "1", ...) for the engine.
+        // Using the numeric index as the key (rather than a constant like "p") is intentional:
+        // it lets us do a single O(1) lookup per paragraph during reassembly below,
+        // and it avoids collisions if two paragraphs happen to share content.
+        // Do NOT simplify this to a single key — that would silently drop all but the last
+        // paragraph if TranslationEngine returns duplicate keys.
         var batch: [String: String] = [:]
         for (i, paragraph) in paragraphs.enumerated() {
             if !shouldSkip(paragraph) {
@@ -44,15 +48,19 @@ public enum MarkdownTranslator {
         }
 
         // Single engine call for all prose paragraphs — one TranslationSession round-trip.
+        // Previously this was one call per paragraph ("p": paragraph), which caused N×M
+        // round-trips for N paragraphs × M locales. The batch approach is N× faster.
+        // batch.isEmpty guard avoids a needless empty-dict engine call for all-code documents.
         let results = batch.isEmpty ? [:] : try await engine.translate(
             batch,
             from: sourceLocale,
             to: targetLocale
         )
 
-        // Reassemble: translated paragraphs replace originals; skipped chunks stay verbatim.
+        // Reassemble in original order: translated paragraphs replace originals by index;
+        // skipped chunks (code blocks, etc.) fall through as nil → original is kept verbatim.
         let translated = paragraphs.enumerated().map { i, paragraph in
-            results["\(i)"] ?? paragraph   // fall back to original if engine returns nothing
+            results["\(i)"] ?? paragraph   // nil = skipped or engine returned nothing; keep original
         }
 
         return translated.joined(separator: "\n\n")

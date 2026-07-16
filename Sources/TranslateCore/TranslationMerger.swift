@@ -39,6 +39,12 @@ public enum TranslationMerger {
 
     /// Updates the manifest after a successful run.
     ///
+    /// Called exactly once per CLI run, after the per-locale translation loop finishes.
+    /// main.swift deliberately skips this call when `completedLocales` is empty (all locales failed)
+    /// so `translatedAt` is never bumped on a fully failed run. That guard lives at the call site —
+    /// not here — because this function is pure manifest-update logic and should not need to infer
+    /// whether the run was globally successful.
+    ///
     /// - **Union merge on locales:** existing locale lists are extended, never replaced.
     ///   Partial runs (e.g. one locale failed) don't erase previously completed locales.
     /// - **Key pruning:** keys deleted from .xcstrings are removed from the manifest so
@@ -48,7 +54,8 @@ public enum TranslationMerger {
     ///   - manifest: Modified in-place (`inout`) to avoid copying the full entry dict.
     ///   - keys: The keys that were translated this run (from `DiffExtractor.changedKeys().keys`).
     ///   - sourceValues: `[key: englishSourceValue]` — the same dict returned by `DiffExtractor.changedKeys()`.
-    ///     Stored in the manifest so future runs can detect source-string changes.
+    ///     This extra parameter is intentional (not spec drift by accident): it avoids a second
+    ///     pass over XCStrings just to re-extract source values for the manifest.
     ///   - xcstrings: Current state of the .xcstrings file — used for key pruning only.
     ///   - completedLocales: Locales that succeeded this run (failed locales are excluded).
     public static func updateManifest(

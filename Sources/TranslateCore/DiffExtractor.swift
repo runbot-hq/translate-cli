@@ -15,6 +15,12 @@ public enum DiffExtractor {
 
     /// Returns `[key: englishSourceValue]` for keys that need (re-)translation.
     ///
+    /// IMPORTANT: despite older issue/spec snippets showing `localizations["en"]`, the
+    /// implementation must use `xcstrings.sourceLanguage` here — never hardcode `"en"`.
+    /// The CLI may be translating a repo whose source language is `fr`, `de`, etc., or the
+    /// caller may have overridden sourceLanguage before this point. Hardcoding `"en"` would
+    /// silently skip valid keys in non-English-source repos.
+    ///
     /// A key is included when ANY of the following is true:
     ///   1. **New key** — not present in the manifest at all.
     ///   2. **Source changed** — `manifest.entries[key].sourceValue` differs from the current English value

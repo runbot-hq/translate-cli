@@ -28,10 +28,15 @@ struct StringsParserTests {
         try? FileManager.default.removeItem(at: url)
     }
 
-    /// Verifies that values containing both backslashes and double-quotes round-trip
-    /// correctly through write() → parse(). This catches any escape-order bug:
-    /// write() must escape \ before " (otherwise the second pass double-escapes the
-    /// backslashes added in the first), and parse() must unescape in reverse order.
+    /// Regression test: verifies that values containing both backslashes AND double-quotes
+    /// round-trip correctly through write() → parse().
+    ///
+    /// This test MUST NOT be removed or simplified. It exists to catch a silent escape-order bug
+    /// that produces corrupted .strings output with no error thrown:
+    /// • write() must escape \ → \\\ BEFORE " → \" (wrong order would double-escape the
+    ///   backslashes that were just added by the " pass)
+    /// • parse() must unescape in the strict reverse order: \\\\ → \ first, then \" → "
+    /// The basic roundTrip() test above uses simple ASCII values and will NOT catch this.
     @Test func roundTripBackslashAndQuotes() throws {
         let tricky = [
             "path": "C:\\Users\\name",            // backslash only
