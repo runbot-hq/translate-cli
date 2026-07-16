@@ -273,6 +273,17 @@ struct TranslateCLI: AsyncParsableCommand {
     /// silently corrupt translations with no runtime error. The actor on TranslationEngine
     /// satisfies Swift 6 checks but does NOT make concurrent locale calls safe.
     ///
+    /// **`inout XCStrings` across `async` — intentional and safe here:**
+    /// `xcstrings` is passed `inout` so each locale's merge result accumulates into one value
+    /// without extra copies. This is safe because:
+    ///   1. The loop is strictly sequential — each `await engine.translate(...)` completes
+    ///      before the next iteration begins.
+    ///   2. `xcstrings` is not read or written anywhere else during this call.
+    ///   3. Swift 6 enforces exclusive access for the duration of each `await` suspension;
+    ///      attempting to alias `xcstrings` in a concurrent task would be a compile error.
+    /// Do NOT refactor to `async let`/`TaskGroup` (breaks sequential guarantee, corrupts output).
+    /// Do NOT remove `inout` — value-return is equivalent but copies the struct on every locale.
+    ///
     /// Returns `(completedLocales, failedLocales)`.
     private func translateAllLocales(
         changedKeys: [String: String],

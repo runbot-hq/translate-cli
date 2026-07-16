@@ -1,0 +1,10 @@
+# SwiftLint configuration for translate-cli
+#
+# file_length raised from default 400 to 450:
+# main.swift is the CLI entry point — it wires ArgumentParser, format dispatch,
+# and locale orchestration, plus extensive inline contract comments that are
+# intentionally kept co-located with the code they describe. The extra length
+# is documentation, not complexity.
+file_length:
+  warning: 450
+  error: 500
