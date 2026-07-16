@@ -31,7 +31,8 @@ public struct XCStringEntry: Codable, Sendable {
     public var extractionState: String?
     public var localizations: [String: XCLocalization]?
 
-    public init(comment: String? = nil, extractionState: String? = nil, localizations: [String: XCLocalization]? = nil) {
+    public init(comment: String? = nil, extractionState: String? = nil,
+                localizations: [String: XCLocalization]? = nil) {
         self.comment = comment
         self.extractionState = extractionState
         self.localizations = localizations

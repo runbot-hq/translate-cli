@@ -41,13 +41,13 @@ public enum MarkdownTranslator {
         // Do NOT simplify this to a single key — that would silently drop all but the last
         // paragraph if TranslationEngine returns duplicate keys.
         var batch: [String: String] = [:]
-        for (i, paragraph) in paragraphs.enumerated() {
+        for (idx, paragraph) in paragraphs.enumerated() {
             // Skip empty paragraphs (e.g. trailing newlines produce a trailing empty chunk)
             // and code blocks. Sending an empty string to the engine wastes a round-trip
             // and returns "" which is indistinguishable from a missing key in the results dict.
             guard !paragraph.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { continue }
             if !shouldSkip(paragraph) {
-                batch["\(i)"] = paragraph
+                batch["\(idx)"] = paragraph
             }
         }
 
@@ -63,8 +63,8 @@ public enum MarkdownTranslator {
 
         // Reassemble in original order: translated paragraphs replace originals by index;
         // skipped chunks (code blocks, etc.) fall through as nil → original is kept verbatim.
-        let translated = paragraphs.enumerated().map { i, paragraph in
-            results["\(i)"] ?? paragraph   // nil = skipped or engine returned nothing; keep original
+        let translated = paragraphs.enumerated().map { idx, paragraph in
+            results["\(idx)"] ?? paragraph   // nil = skipped or engine returned nothing; keep original
         }
 
         return translated.joined(separator: "\n\n")

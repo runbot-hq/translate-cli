@@ -64,7 +64,8 @@ struct StringsParserTests {
         try StringsParser.write(tricky, to: url)
         let result = try StringsParser.parse(from: url)
         for (key, expected) in tricky {
-            #expect(result[key] == expected, "Round-trip failed for key '\(key)': got \(String(describing: result[key]))")
+            let got = String(describing: result[key])
+            #expect(result[key] == expected, "Round-trip failed for key '\(key)': got \(got)")
         }
         try? FileManager.default.removeItem(at: url)
     }

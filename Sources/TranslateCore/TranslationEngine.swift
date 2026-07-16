@@ -40,7 +40,8 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
         case let .unsupportedPair(source, target):
             return "Unsupported language pair: \(source) → \(target)"
         case let .languagePackNotInstalled(source, target):
-            return "Language pack not installed: \(source) → \(target). Download via System Settings → Language & Region → Translation Languages."
+            return "Language pack not installed: \(source) → \(target). "
+                + "Download via System Settings → Language & Region → Translation Languages."
         case let .requiresmacOS26(feature):
             return "\(feature) requires macOS 26+"
         }
@@ -120,7 +121,10 @@ public actor TranslationEngine: Translating {
                 // the caller skips this locale rather than attempting a translation that may panic.
                 // If you see this warning, check for a newer Apple Translation framework release
                 // and update the switch to handle the new case explicitly.
-                fputs("Warning: unrecognised LanguageAvailability status for \(sourceLocale.identifier) → \(targetLocale.identifier); treating as unsupported. Update TranslationEngine if a new status case was added.\n", stderr)
+                let msg = "Warning: unrecognised LanguageAvailability status for "
+                    + "\(sourceLocale.identifier) → \(targetLocale.identifier); "
+                    + "treating as unsupported. Update TranslationEngine if a new status case was added.\n"
+                fputs(msg, stderr)
                 throw TranslationEngineError.unsupportedPair(
                     source: sourceLocale.identifier,
                     target: targetLocale.identifier
@@ -149,7 +153,10 @@ public actor TranslationEngine: Translating {
             // This is acceptable for v1 — the retry is harmless and the error will still
             // surface on attempt 2. If you ever run on 26.0–26.3 runners and see spurious
             // retries for missing packs, add the opaque error substring to isFatalTranslateError.
-            fputs("Warning: macOS 26.4+ required for \(quality == .high ? ".highFidelity" : ".lowLatency") strategy; falling back to default quality (macOS \(ProcessInfo.processInfo.operatingSystemVersionString))\n", stderr)
+            let strategyName = quality == .high ? ".highFidelity" : ".lowLatency"
+            let osVersion = ProcessInfo.processInfo.operatingSystemVersionString
+            fputs("Warning: macOS 26.4+ required for \(strategyName) strategy; "
+                + "falling back to default quality (macOS \(osVersion))\n", stderr)
             let session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
             return try await runBatch(pairs: pairs, session: session)
         } else {
@@ -161,11 +168,18 @@ public actor TranslationEngine: Translating {
 
 // MARK: - Batch execution
 
-// runBatch is a free function (not a method on TranslationEngine) so that
-// `TranslationSession` never crosses the actor boundary — the session is created
-// by the caller inside the actor and passed in here directly.
-// Keeping it free avoids a stored-property solution that would require
-// additional lifecycle management.
+// runBatch is a FREE FUNCTION, not a method on TranslationEngine. This is intentional.
+//
+// Why not a method? TranslationSession is created inside the actor's `translate()` method
+// (where it is always consumed immediately) and passed into runBatch directly. This keeps
+// TranslationSession entirely within the actor's isolation domain without storing it as a
+// property. A stored-property approach would require explicit lifecycle management
+// (init/deinit, reset between calls) and risks accidentally sharing a session across
+// locales, which is unsafe.
+//
+// The free function signature makes the data flow explicit and auditable:
+// session is always freshly constructed by the actor caller, used once, and discarded.
+// Do NOT refactor this into an instance method or store TranslationSession on the actor.
 private func runBatch(pairs: [String: String], session: TranslationSession) async throws -> [String: String] {
     // clientIdentifier echoes the key back in the response, so we can re-associate
     // translated values with their keys regardless of response ordering.
@@ -185,7 +199,9 @@ private func runBatch(pairs: [String: String], session: TranslationSession) asyn
         // won't record it, so subsequent runs will re-translate it forever.
         // We warn to stderr so the runner log captures it if it ever fires.
         guard let key = response.clientIdentifier else {
-            fputs("Warning: TranslationSession returned a response with nil clientIdentifier — translation for one key was dropped. This is an Apple framework bug; the key will be retried on the next run.\n", stderr)
+            fputs("Warning: TranslationSession returned a response with nil clientIdentifier — "
+                + "translation for one key was dropped. "
+                + "This is an Apple framework bug; the key will be retried on the next run.\n", stderr)
             continue
         }
         result[key] = response.targetText
@@ -197,7 +213,9 @@ private func runBatch(pairs: [String: String], session: TranslationSession) asyn
     // Those keys will be retried on the next run (manifest won't record them).
     if result.count < pairs.count {
         let dropped = pairs.count - result.count
-        fputs("Warning: TranslationSession returned \(dropped) fewer response(s) than requests — \(dropped) key(s) silently dropped by Apple framework. They will be retried on the next run.\n", stderr)
+        fputs("Warning: TranslationSession returned \(dropped) fewer response(s) than requests — "
+            + "\(dropped) key(s) silently dropped by Apple framework. "
+            + "They will be retried on the next run.\n", stderr)
     }
     return result
 }

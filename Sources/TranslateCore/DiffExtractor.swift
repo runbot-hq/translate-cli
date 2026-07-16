@@ -54,8 +54,14 @@ public enum DiffExtractor {
                 continue
             }
             let sourceChanged = record.sourceValue != sourceValue
-            // hasNewLocale: true if any requested locale has never been translated for this key.
-            // This is how adding "zh-Hans" to localization.config.json triggers a back-fill run.
+            // hasNewLocale: true if ANY target locale is missing from the manifest record.
+            // The double-negative (`!record.locales.contains`) is intentional:
+            //   targetLocales.contains { !record.locales.contains($0) }
+            //   = "does any requested locale NOT already appear in manifest.locales?"
+            // This is how adding "zh-Hans" to localization.config.json triggers an
+            // automatic back-fill run for all existing keys on the next invocation.
+            // Do NOT simplify to `targetLocales != record.locales` — order, subsets, and
+            // supersets of the manifest's locale list all need to be handled correctly.
             let hasNewLocale = targetLocales.contains { !record.locales.contains($0) }
             if sourceChanged || hasNewLocale {
                 result[key] = sourceValue

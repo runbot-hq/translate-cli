@@ -6,7 +6,8 @@ import Foundation
 
 /// Parses and writes legacy `.strings` files.
 ///
-/// `.strings` format reference: https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/LoadingResources/Strings/Strings.html
+/// `.strings` format reference:
+/// https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/LoadingResources/Strings/Strings.html
 /// This parser handles the common single-file source format where all source strings
 /// live in one flat file. Output is written per-locale into `{locale}.lproj/` subdirectories
 /// by `main.swift` — not by this parser — to avoid a single-path overwrite when multiple
@@ -26,6 +27,12 @@ public enum StringsParser {
     // Quantifier is `*` (zero or more), NOT `+` (one or more). Using `+` would silently skip
     // entries with empty values (e.g. "key" = "";) which are valid in Apple's .strings format.
     // Keys are still required to be non-empty (key group uses `+`).
+    //
+    // Limitation: the parser is line-by-line (`components(separatedBy: "\n")` below).
+    // Values with literal embedded newlines spanning multiple file lines would be silently
+    // dropped. In practice Apple tooling always writes `\n` escape sequences on a single line,
+    // so this is not a real-world concern. If this parser is ever generalised to handle
+    // hand-authored or non-Apple-generated .strings files, add multi-line value support.
     nonisolated(unsafe) private static let linePattern = #/^\s*"((?:[^"\\]|\\.)+)"\s*=\s*"((?:[^"\\]|\\.)*)"\s*;/#
 
     /// Parses a `.strings` file and returns a `[key: value]` dictionary.

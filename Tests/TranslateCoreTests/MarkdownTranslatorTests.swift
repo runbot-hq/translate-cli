@@ -21,12 +21,22 @@ actor EchoEngine: Translating {
 @Suite("MarkdownTranslator")
 struct MarkdownTranslatorTests {
 
+    // Convenience: translate `input` from English to German using the given stub engine.
+    private func translate(_ input: String, using engine: EchoEngine) async throws -> String {
+        try await MarkdownTranslator.translate(
+            input,
+            from: Locale(identifier: "en"),
+            to: Locale(identifier: "de"),
+            using: engine
+        )
+    }
+
     // MARK: shouldSkip — code blocks
 
     @Test func backtickFence_isSkipped() async throws {
         let engine = EchoEngine()
         let input = "```\nlet x = 1\n```"
-        let result = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         #expect(batches.allSatisfy { $0.isEmpty })
         #expect(result == input)
@@ -35,7 +45,7 @@ struct MarkdownTranslatorTests {
     @Test func tildeFence_isSkipped() async throws {
         let engine = EchoEngine()
         let input = "~~~\nsome code\n~~~"
-        let result = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         #expect(batches.allSatisfy { $0.isEmpty })
         #expect(result == input)
@@ -44,7 +54,7 @@ struct MarkdownTranslatorTests {
     @Test func fourSpaceIndent_isSkipped() async throws {
         let engine = EchoEngine()
         let input = "    indented code\n    second line"
-        let result = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         #expect(batches.allSatisfy { $0.isEmpty })
         #expect(result == input)
@@ -54,7 +64,7 @@ struct MarkdownTranslatorTests {
 
     @Test func prose_isBatched() async throws {
         let engine = EchoEngine()
-        let result = try await MarkdownTranslator.translate("Hello world", from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate("Hello world", using: engine)
         let batches = await engine.receivedBatches
         #expect(batches.count == 1)
         #expect(batches[0].count == 1)
@@ -64,7 +74,7 @@ struct MarkdownTranslatorTests {
     @Test func multipleParagraphs_singleEngineCall() async throws {
         let engine = EchoEngine()
         let input = "Para one\n\nPara two\n\nPara three"
-        let result = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         // All three paragraphs go in one engine call — not three separate calls
         #expect(batches.count == 1)
@@ -75,7 +85,7 @@ struct MarkdownTranslatorTests {
     @Test func mixedProseAndCode_codeSkipped_proseBatched() async throws {
         let engine = EchoEngine()
         let input = "Intro\n\n```\ncode\n```\n\nClosing"
-        let result = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         // Only the two prose paragraphs reach the engine
         #expect(batches.count == 1)
@@ -90,7 +100,7 @@ struct MarkdownTranslatorTests {
 
     @Test func emptyDocument_noEngineCall() async throws {
         let engine = EchoEngine()
-        let result = try await MarkdownTranslator.translate("", from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        let result = try await translate("", using: engine)
         let batches = await engine.receivedBatches
         #expect(batches.allSatisfy { $0.isEmpty })
         #expect(result == "")
@@ -99,7 +109,7 @@ struct MarkdownTranslatorTests {
     @Test func allCodeBlocks_noEngineCall() async throws {
         let engine = EchoEngine()
         let input = "```\nblock one\n```\n\n```\nblock two\n```"
-        _ = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        _ = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         // batch.isEmpty guard: engine must not be called at all
         #expect(batches.allSatisfy { $0.isEmpty })
@@ -113,7 +123,7 @@ struct MarkdownTranslatorTests {
     @Test func fencedBlockWithInternalBlankLine_knownLimitation() async throws {
         let engine = EchoEngine()
         let input = "```\nline one\n\nline two\n```"
-        _ = try await MarkdownTranslator.translate(input, from: Locale(identifier: "en"), to: Locale(identifier: "de"), using: engine)
+        _ = try await translate(input, using: engine)
         let batches = await engine.receivedBatches
         let nonEmpty = batches.filter { !$0.isEmpty }
         // Known: second chunk (body) leaks through. Engine IS called.

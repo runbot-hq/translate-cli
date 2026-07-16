@@ -11,8 +11,14 @@ public enum TranslationMerger {
 
     /// Merges a locale's translated `[key: value]` slice back into the base XCStrings.
     ///
-    /// Returns a new XCStrings value — does not mutate the caller's copy.
+    /// Returns a new XCStrings value (copy semantics) — does not mutate the caller's copy.
     /// The returned value becomes the new `base` for the next locale in the sequential loop.
+    ///
+    /// Note: The original spec (#2103) described `inout` mutation to avoid per-locale copies.
+    /// The implementation uses value semantics instead (simpler, no aliasing risk). For
+    /// production-scale `.xcstrings` files with many locales this is negligible; if it ever
+    /// becomes a measurable concern, switching to `inout` here and at the call site in
+    /// `main.swift` is straightforward.
     ///
     /// - Note: State is set to `"translated"` (the standard Xcode-recognised state for
     ///   machine-translated strings). Xcode may mark these for human review depending on

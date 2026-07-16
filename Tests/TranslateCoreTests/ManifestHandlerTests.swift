@@ -67,7 +67,8 @@ struct ManifestHandlerTests {
         try ManifestHandler.save(first, to: path)
 
         var second = TranslationManifest()
-        second.entries["key"] = ManifestEntry(sourceValue: "new", translatedAt: "2026-07-16T00:00:00Z", locales: ["de", "fr"])
+        second.entries["key"] = ManifestEntry(
+            sourceValue: "new", translatedAt: "2026-07-16T00:00:00Z", locales: ["de", "fr"])
         try ManifestHandler.save(second, to: path)
 
         let loaded = try ManifestHandler.load(from: path)

@@ -47,7 +47,8 @@ struct TranslationMergerTests {
     @Test func updateManifest_prunesDeletedKey() {
         var xcstrings = baseXCStrings()
         var manifest = TranslationManifest()
-        manifest.entries["old_key"] = ManifestEntry(sourceValue: "Old", translatedAt: "2026-01-01T00:00:00Z", locales: ["de"])
+        manifest.entries["old_key"] = ManifestEntry(
+            sourceValue: "Old", translatedAt: "2026-01-01T00:00:00Z", locales: ["de"])
         TranslationMerger.updateManifest(
             &manifest,
             keys: [],
