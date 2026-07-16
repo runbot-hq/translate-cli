@@ -218,6 +218,11 @@ struct TranslateCLI: AsyncParsableCommand {
         // (degenerate Apple framework response). Those locales are moved to failedLocales so
         // the manifest does NOT record them as done — they will be retried on the next run.
         var writtenLocales: [String] = []
+        // effectiveFailed starts as a copy of failedLocales (locales that threw during translation)
+        // and may grow to include locales that translated successfully but produced all-empty output
+        // (degenerate Apple framework response caught by writeOutput). Using a separate var rather
+        // than mutating failedLocales avoids confusion: failedLocales is the "threw" set,
+        // effectiveFailed is the union of threw + empty-output. Both are distinct failure modes.
         var effectiveFailed = failedLocales
         if !completedLocales.isEmpty {
             writtenLocales = try writeOutput(
@@ -345,6 +350,12 @@ struct TranslateCLI: AsyncParsableCommand {
     ///   format a locale may be omitted if all its translated values were empty (degenerate
     ///   Apple framework response) — the caller must treat omitted locales as failed so the
     ///   manifest does not permanently record them as complete with nothing written.
+    // @discardableResult: the return value matters and callers MUST use it
+    // (see runStructured — writtenLocales drives manifest recording and effectiveFailed).
+    // The attribute exists only to allow the xcstrings-format fast-path, where the
+    // caller already knows all completedLocales were written and doesn't need to
+    // re-read the return value. It is NOT an invitation to silently discard the result
+    // in new call sites. If you add a call to writeOutput, always capture the return value.
     @discardableResult
     private func writeOutput(
         xcstrings: XCStrings,

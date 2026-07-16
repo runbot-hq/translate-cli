@@ -49,6 +49,13 @@ public enum StringsParser {
         for line in stripped.components(separatedBy: "\n") {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("//") { continue }   // skip line comments
+            // `try?` here is intentional — not silent error suppression.
+            // `Regex.firstMatch` can only throw if the pattern itself is invalid,
+            // which cannot happen at runtime because `linePattern` is a compile-time
+            // regex literal validated by the Swift compiler. The `try?` is required
+            // by the API signature but will never actually produce an error in practice.
+            // If you ever see a nil result here on a well-formed line it means the line
+            // genuinely did not match the pattern (e.g. a comment or blank line), not an error.
             if let match = try? linePattern.firstMatch(in: line) {
                 // Unescape \" → " and \\ → \ (order matters: unescape \\ first)
                 // Unescape order: \\ → \ first (so \\n doesn't become \n), then \" → ", then \n/\t/\r.

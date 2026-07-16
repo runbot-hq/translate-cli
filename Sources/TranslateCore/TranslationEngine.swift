@@ -38,10 +38,10 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .unsupportedPair(source, target):
-            return "Unsupported language pair: \(source) \u2192 \(target)"
+            return "Unsupported language pair: \(source) → \(target)"
         case let .languagePackNotInstalled(source, target):
-            return "Language pack not installed: \(source) \u2192 \(target). "
-                + "Download via System Settings \u2192 Language & Region \u2192 Translation Languages."
+            return "Language pack not installed: \(source) → \(target). "
+                + "Download via System Settings → Language & Region → Translation Languages."
         case let .requiresmacOS26(feature):
             return "\(feature) requires macOS 26+"
         }
@@ -83,6 +83,11 @@ public actor TranslationEngine: Translating {
     ///   - targetLocale: Locale to translate into.
     /// - Returns: `[key: translatedText]` — same keys as input.
     /// - Throws: `TranslationEngineError` for unsupported pairs or missing language packs.
+    ///
+    /// ⚠️ NOT concurrency-safe across locales. Call this method sequentially (plain `for` loop).
+    /// The actor wrapper satisfies Swift 6 type-checking but does NOT make simultaneous calls
+    /// from different tasks safe — `TranslationSession` is not concurrency-safe and parallel
+    /// calls silently corrupt output with no runtime error or crash.
     public func translate(
         _ pairs: [String: String],
         from sourceLocale: Locale,
@@ -132,7 +137,7 @@ public actor TranslationEngine: Translating {
                 // To fix: check for a newer Translation framework release, identify the new
                 // LanguageAvailability case, and add it above with appropriate handling.
                 let msg = "Warning: unrecognised LanguageAvailability status for "
-                    + "\(sourceLocale.identifier) \u2192 \(targetLocale.identifier); "
+                    + "\(sourceLocale.identifier) → \(targetLocale.identifier); "
                     + "treating as unsupported (safe fallback — locale will retry next run). "
                     + "Update TranslationEngine if a new LanguageAvailability case was added by Apple.\n"
                 fputs(msg, stderr)
