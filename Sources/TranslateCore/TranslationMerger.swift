@@ -45,8 +45,7 @@ public enum TranslationMerger {
         var updated = base
         for (key, translatedValue) in slice {
             // Skip if the key was removed between diff and merge (unlikely but defensive)
-            guard updated.strings[key] != nil else { continue }
-            var entry = updated.strings[key]!
+            guard var entry = updated.strings[key] else { continue }
             var localizations = entry.localizations ?? [:]
             localizations[locale] = XCLocalization(
                 stringUnit: XCStringUnit(state: "translated", value: translatedValue)
