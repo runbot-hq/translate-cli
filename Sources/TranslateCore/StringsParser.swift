@@ -65,11 +65,15 @@ public enum StringsParser {
     /// Escape order: \ → \\ first, then " → \" — reversing this order would
     /// double-escape the backslashes added in the first pass.
     public static func write(_ strings: [String: String], to url: URL) throws {
-        let lines = strings.keys.sorted().map { key -> String in
+        let lines = strings.keys.sorted().compactMap { key -> String? in
+            // Use guard + subscript rather than force-unwrap: keys.sorted() iterates keys
+            // confirmed present in the dict, so nil here is impossible in practice, but
+            // compactMap + guard is safer under refactor than `strings[key]!`.
+            guard let rawValue = strings[key] else { return nil }
             let escapedKey = key
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedValue = strings[key]!
+            let escapedValue = rawValue
                 .replacingOccurrences(of: "\\", with: "\\\\")
                 .replacingOccurrences(of: "\"", with: "\\\"")
             return "\"\(escapedKey)\" = \"\(escapedValue)\";"

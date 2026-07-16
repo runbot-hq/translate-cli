@@ -138,6 +138,17 @@ public actor TranslationEngine: Translating {
             // We deliberately fall back to the unqualified init and warn via stderr.
             // Callers on these OS versions always get OS-default quality regardless of --quality flag.
             // This is a known, documented limitation — not a regression.
+            //
+            // ⚠️ Language pack errors on macOS 26.0–26.3:
+            // On these OS versions we cannot call LanguageAvailability (requires 26.4), so we
+            // skip the pack-status preflight check. If the language pack is missing, Apple's
+            // framework throws an opaque error whose message we do not control and which may
+            // NOT contain the substring "language pack not installed".
+            // Consequence: the TypeScript action's isFatalTranslateError() may NOT match the
+            // error and will retry it (up to once) rather than surfacing it as fatal.
+            // This is acceptable for v1 — the retry is harmless and the error will still
+            // surface on attempt 2. If you ever run on 26.0–26.3 runners and see spurious
+            // retries for missing packs, add the opaque error substring to isFatalTranslateError.
             fputs("Warning: macOS 26.4+ required for \(quality == .high ? ".highFidelity" : ".lowLatency") strategy; falling back to default quality (macOS \(ProcessInfo.processInfo.operatingSystemVersionString))\n", stderr)
             let session = TranslationSession(installedSource: sourceLanguage, target: targetLanguage)
             return try await runBatch(pairs: pairs, session: session)

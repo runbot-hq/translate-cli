@@ -91,6 +91,13 @@ struct TranslateCLI: AsyncParsableCommand {
                 do {
                     let result = try await MarkdownTranslator.translate(
                         text,
+                        // "en" default is correct for the current release-notes use case (always
+                        // English source). Markdown has no embedded source-language field, so we
+                        // cannot auto-detect it the way xcstrings mode does via xcstrings.sourceLanguage.
+                        // If markdown ever needs non-English source support, change this to an explicit
+                        // error when --source-language is omitted rather than silently defaulting to "en".
+                        // xcstrings and strings modes are NOT affected — they handle source language
+                        // independently and do not reach this code path.
                         from: Locale(identifier: sourceLanguage ?? "en"),
                         to: targetLocale,
                         using: engine
