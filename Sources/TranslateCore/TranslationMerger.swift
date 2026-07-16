@@ -14,14 +14,12 @@ public enum TranslationMerger {
     /// Returns a new XCStrings value (copy semantics) — does not mutate the caller's copy.
     /// The returned value becomes the new `base` for the next locale in the sequential loop.
     ///
-    /// **Spec divergence (not a bug):** The original spec in run-bot#2103 described this as
-    /// `merge(base: inout XCStrings, ...)` (mutation semantics). The implementation uses
-    /// value-return semantics instead: `merge(base: XCStrings, ...) -> XCStrings`.
-    /// This was a deliberate implementation improvement — value semantics is simpler,
-    /// eliminates aliasing risk, and is idiomatic Swift for struct types. The call site
-    /// in main.swift is written for the value-return signature:
+    /// **Spec note:** Both issue #2103 and #2105 §1.7 specify value-return semantics:
+    /// `merge(base: XCStrings, ...) -> XCStrings`. The implementation matches the spec.
+    /// Value-return is simpler, eliminates aliasing risk, and is idiomatic Swift for struct
+    /// types. The call site in main.swift:
     ///   `xcstrings = TranslationMerger.merge(base: xcstrings, ...)`
-    /// Do NOT change this back to `inout` to match the spec — the spec comment is stale.
+    /// Do NOT change to `inout` — spec and implementation are in agreement on this.
     /// For production-scale .xcstrings files with many locales the copy cost is negligible;
     /// if profiling ever shows otherwise, switching to `inout` here and at the call site
     /// is a one-line change.

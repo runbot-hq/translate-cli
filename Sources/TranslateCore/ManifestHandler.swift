@@ -8,7 +8,7 @@ import Foundation
 
 // MARK: - Models
 
-/// A single entry in the translation manifest: the English source value at the time
+/// A single entry in the translation manifest: the source-language value at the time
 /// of last translation, the timestamp, and which locales were translated.
 /// `sourceValue` is the key used by DiffExtractor to detect changed source strings.
 public struct ManifestEntry: Codable, Sendable {

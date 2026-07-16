@@ -350,13 +350,8 @@ struct TranslateCLI: AsyncParsableCommand {
     ///   format a locale may be omitted if all its translated values were empty (degenerate
     ///   Apple framework response) — the caller must treat omitted locales as failed so the
     ///   manifest does not permanently record them as complete with nothing written.
-    // @discardableResult: the return value matters and callers MUST use it
-    // (see runStructured — writtenLocales drives manifest recording and effectiveFailed).
-    // The attribute exists only to allow the xcstrings-format fast-path, where the
-    // caller already knows all completedLocales were written and doesn't need to
-    // re-read the return value. It is NOT an invitation to silently discard the result
-    // in new call sites. If you add a call to writeOutput, always capture the return value.
-    @discardableResult
+    // Return value is load-bearing: writtenLocales drives manifest recording and effectiveFailed
+    // (see runStructured). Always capture the return value at every call site.
     private func writeOutput(
         xcstrings: XCStrings,
         completedLocales: [String],
@@ -396,6 +391,9 @@ struct TranslateCLI: AsyncParsableCommand {
             }
             return written
         }
-        return []
+        // If a new structured format is added, writeOutput and loadSource must both be updated.
+        // Reaching here means the format routing above is incomplete — fail loudly rather than
+        // silently returning [] (which would suppress manifest writes and look like success).
+        fatalError("writeOutput: unhandled format '\(format)' — add a branch above and update loadSource accordingly")
     }
 }
