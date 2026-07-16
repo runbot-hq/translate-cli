@@ -141,23 +141,23 @@ struct TranslateCLI: AsyncParsableCommand {
             }
         }
 
+        // Guard: do NOT write on total failure — empty string would silently clobber the
+        // source file when --output is in-place (default). Mirrors runStructured early-exit.
+        guard !allTranslated.isEmpty else {
+            fputs("Warning: all locales failed in markdown mode — output file not written.\n", stderr)
+            return
+        }
         let combined = allTranslated.joined(separator: "\n\n---\n\n")
         try combined.write(toFile: outputPath, atomically: true, encoding: .utf8)
 
-        // Output lines are parsed by the TypeScript action's parseOutput() function.
-        // Format must remain key=value, one per line, no extra whitespace.
+        // stdout: key=value lines parsed by TypeScript parseOutput(). Format is stable contract.
         //
-        // keys_translated=1 in markdown mode: the document is one translatable unit.
-        // This is NOT a bug or an off-by-one — it is intentional contract design.
-        // We do NOT emit allTranslated.count (number of locales) here — that would
-        // conflate "locales" with "keys", producing a misleading number (e.g. 5 for
-        // 5 locales when only 1 document was translated).
-        // IMPORTANT: do NOT gate a commit step on `keys_translated > 0` in markdown mode.
-        // keys_translated is 1 even when every locale fails (completedLocales.isEmpty).
-        // The correct gate is `languages_completed != ''` — that reflects actual output.
-        // The xcstrings/strings runStructured path uses keys_translated differently
-        // (count of source keys changed); this markdown-specific semantics is intentional
-        // and is documented in issue #2103 §output-contract.
+        // keys_translated=1 in markdown mode: the document is ONE unit, not a key count.
+        // NOT a bug — intentional. Do NOT emit allTranslated.count (that conflates locales
+        // with keys). Do NOT gate a commit on keys_translated > 0 in markdown mode — it
+        // returns 1 even on total failure. Gate on languages_completed != '' instead.
+        // xcstrings/strings mode uses keys_translated differently (source-key diff count).
+        // See issue #2103 §output-contract.
         print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
         print("languages_completed=\(completedLocales.joined(separator: ","))")
         print("languages_failed=\(failedLocales.joined(separator: ","))")

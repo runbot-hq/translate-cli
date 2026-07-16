@@ -94,7 +94,15 @@ public enum TranslationMerger {
         let now = Self.isoFormatter.string(from: Date())
 
         for key in keys {
-            guard let sourceValue = sourceValues[key] else { continue }
+            // sourceValues and keys both derive from DiffExtractor.changedKeys() so a miss
+            // should never happen — but if a future refactor passes them from different
+            // sources, a missing sourceValue would silently skip the manifest update,
+            // causing that key to be re-translated on every subsequent run forever.
+            guard let sourceValue = sourceValues[key] else {
+                fputs("Warning: updateManifest: no sourceValue for key '\(key)'"
+                    + " — manifest not updated; key will be re-translated next run.\n", stderr)
+                continue
+            }
             let existingLocales = manifest.entries[key]?.locales ?? []
             // Union: keep existing locales + add newly completed ones; sort for stable JSON diffs
             let mergedLocales = Array(Set(existingLocales + completedLocales)).sorted()
