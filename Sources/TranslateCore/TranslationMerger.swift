@@ -14,11 +14,17 @@ public enum TranslationMerger {
     /// Returns a new XCStrings value (copy semantics) — does not mutate the caller's copy.
     /// The returned value becomes the new `base` for the next locale in the sequential loop.
     ///
-    /// Note: The original spec (#2103) described `inout` mutation to avoid per-locale copies.
-    /// The implementation uses value semantics instead (simpler, no aliasing risk). For
-    /// production-scale `.xcstrings` files with many locales this is negligible; if it ever
-    /// becomes a measurable concern, switching to `inout` here and at the call site in
-    /// `main.swift` is straightforward.
+    /// **Spec divergence (not a bug):** The original spec in run-bot#2103 described this as
+    /// `merge(base: inout XCStrings, ...)` (mutation semantics). The implementation uses
+    /// value-return semantics instead: `merge(base: XCStrings, ...) -> XCStrings`.
+    /// This was a deliberate implementation improvement — value semantics is simpler,
+    /// eliminates aliasing risk, and is idiomatic Swift for struct types. The call site
+    /// in main.swift is written for the value-return signature:
+    ///   `xcstrings = TranslationMerger.merge(base: xcstrings, ...)`
+    /// Do NOT change this back to `inout` to match the spec — the spec comment is stale.
+    /// For production-scale .xcstrings files with many locales the copy cost is negligible;
+    /// if profiling ever shows otherwise, switching to `inout` here and at the call site
+    /// is a one-line change.
     ///
     /// - Note: State is set to `"translated"` (the standard Xcode-recognised state for
     ///   machine-translated strings). Xcode may mark these for human review depending on
@@ -56,12 +62,18 @@ public enum TranslationMerger {
     /// - **Key pruning:** keys deleted from .xcstrings are removed from the manifest so
     ///   the manifest doesn't accumulate stale entries over time.
     ///
+    /// **`sourceValues` parameter — intentional addition beyond original spec:**
+    /// The original spec (run-bot#2105 §1.7) defined this signature without `sourceValues`.
+    /// The parameter was added deliberately: it avoids a second pass over XCStrings to
+    /// re-extract source values for the manifest. `DiffExtractor.changedKeys()` already
+    /// returns `[key: sourceValue]`, so passing that dict here is zero extra work at the
+    /// call site and removes a redundant XCStrings lookup inside this function.
+    /// Do NOT remove `sourceValues` to match the original spec — the spec is stale on this point.
+    ///
     /// - Parameters:
     ///   - manifest: Modified in-place (`inout`) to avoid copying the full entry dict.
     ///   - keys: The keys that were translated this run (from `DiffExtractor.changedKeys().keys`).
-    ///   - sourceValues: `[key: englishSourceValue]` — the same dict returned by `DiffExtractor.changedKeys()`.
-    ///     This extra parameter is intentional (not spec drift by accident): it avoids a second
-    ///     pass over XCStrings just to re-extract source values for the manifest.
+    ///   - sourceValues: `[key: sourceValue]` — the dict returned by `DiffExtractor.changedKeys()`.
     ///   - xcstrings: Current state of the .xcstrings file — used for key pruning only.
     ///   - completedLocales: Locales that succeeded this run (failed locales are excluded).
     public static func updateManifest(

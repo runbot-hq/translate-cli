@@ -15,6 +15,20 @@ import Foundation
 /// call per locale rather than one call per paragraph. For a document with N paragraphs
 /// this is N× fewer session round-trips.
 ///
+/// **`keys_translated` output contract in markdown mode:**
+/// main.swift emits `keys_translated=1` when at least one locale completed, and
+/// `keys_translated=0` when all locales failed. The document is treated as one
+/// translatable unit, not one key per paragraph. This is intentional:
+///   - The action's commit step gates on `languages_completed` (per-locale success),
+///     not on `keys_translated` (which is a pre-flight diff count in xcstrings mode).
+///   - Emitting paragraph count would conflate "paragraphs" with "source keys" and
+///     confuse callers using the output to drive commit decisions.
+///   - Partial fenced-block corruption (see limitation below) does NOT change this
+///     value: a partially-corrupted document still results in `keys_translated=1`
+///     because the document WAS translated. Callers who need corruption detection
+///     should use a linter on the output file, not rely on this counter.
+///     This is a known, accepted v1 tradeoff. See v2 note in shouldSkip().
+///
 /// ⚠️ Known limitation: fenced code blocks (``` or ~~~) that contain a double-newline
 /// (`\n\n`) inside the fence are split across multiple chunks by `components(separatedBy: "\n\n")`.
 /// Only the first chunk (containing the opening fence marker) is detected and skipped;
@@ -77,7 +91,7 @@ public enum MarkdownTranslator {
     /// - **4-space indented blocks:** every non-empty line starts with 4 spaces
     ///
     /// NOT skipped — these are intentional design decisions:
-    /// - **Inline code spans** (`` `code` `` inside prose): Apple’s framework preserves
+    /// - **Inline code spans** (`` `code` `` inside prose): Apple's framework preserves
     ///   backtick-wrapped spans and does not translate their contents, so we leave them.
     /// - **Headings / bullet points / blockquotes**: these contain prose that should be
     ///   translated. Do NOT add hasPrefix("#"), hasPrefix("-"), or hasPrefix(">") guards
@@ -90,6 +104,8 @@ public enum MarkdownTranslator {
     /// multiple chunks; only the opening chunk is skipped. This is the documented
     /// limitation in the file header above — do not paper over it here with line-level
     /// logic without replacing the whole splitting strategy.
+    /// v2 note: replace `components(separatedBy: "\n\n")` with a CommonMark block parser
+    /// if full fenced-block fidelity is required.
     private static func shouldSkip(_ chunk: String) -> Bool {
         let trimmed = chunk.trimmingCharacters(in: .newlines)
         if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {

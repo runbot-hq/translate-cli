@@ -38,10 +38,10 @@ public enum TranslationEngineError: Error, CustomStringConvertible {
     public var description: String {
         switch self {
         case let .unsupportedPair(source, target):
-            return "Unsupported language pair: \(source) → \(target)"
+            return "Unsupported language pair: \(source) \u2192 \(target)"
         case let .languagePackNotInstalled(source, target):
-            return "Language pack not installed: \(source) → \(target). "
-                + "Download via System Settings → Language & Region → Translation Languages."
+            return "Language pack not installed: \(source) \u2192 \(target). "
+                + "Download via System Settings \u2192 Language & Region \u2192 Translation Languages."
         case let .requiresmacOS26(feature):
             return "\(feature) requires macOS 26+"
         }
@@ -116,14 +116,25 @@ public actor TranslationEngine: Translating {
                     target: targetLocale.identifier
                 )
             @unknown default:
-                // A new LanguageAvailability status was added by Apple that we don't recognise.
-                // Warn to stderr so the runner log captures it, then treat as unsupported so
-                // the caller skips this locale rather than attempting a translation that may panic.
-                // If you see this warning, check for a newer Apple Translation framework release
-                // and update the switch to handle the new case explicitly.
+                // A new LanguageAvailability status was added by Apple that we don't recognise yet.
+                //
+                // Why `.unsupported` (throw + skip) rather than `.installed` (proceed)?
+                // Proceeding with an unrecognised status risks creating a TranslationSession
+                // in an undefined state — which could corrupt output silently. Skipping is the
+                // conservative, safe choice: the locale is retried on the next run, and the
+                // warning below tells the developer exactly what to fix.
+                //
+                // This is NOT a lazy catch-all. Each known status is handled explicitly above.
+                // @unknown default exists only for future Apple API additions we haven't seen yet.
+                // If Apple adds .downloading or .pending in a future OS, add explicit cases here
+                // rather than expanding this default.
+                //
+                // To fix: check for a newer Translation framework release, identify the new
+                // LanguageAvailability case, and add it above with appropriate handling.
                 let msg = "Warning: unrecognised LanguageAvailability status for "
-                    + "\(sourceLocale.identifier) → \(targetLocale.identifier); "
-                    + "treating as unsupported. Update TranslationEngine if a new status case was added.\n"
+                    + "\(sourceLocale.identifier) \u2192 \(targetLocale.identifier); "
+                    + "treating as unsupported (safe fallback — locale will retry next run). "
+                    + "Update TranslationEngine if a new LanguageAvailability case was added by Apple.\n"
                 fputs(msg, stderr)
                 throw TranslationEngineError.unsupportedPair(
                     source: sourceLocale.identifier,
