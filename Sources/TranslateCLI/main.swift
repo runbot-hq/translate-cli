@@ -51,6 +51,12 @@ struct TranslateCLI: AsyncParsableCommand {
         """)
     var sourceLanguage: String?
 
+    // --debug: enables verbose stderr logging (TranslationEngine session steps, key counts, etc.).
+    // Passed by the TypeScript action when the `debug` input is 'true'.
+    // Uses .customLong to produce exactly `--debug` (not `--is-debug` from the property name).
+    @Flag(name: .customLong("debug"), help: "Enable verbose debug output to stderr.")
+    var isDebug: Bool = false
+
     mutating func run() async throws {
         // 1. Resolve target locales.
         // --languages takes precedence; fall back to --config; error if neither.
@@ -89,6 +95,13 @@ struct TranslateCLI: AsyncParsableCommand {
         }
         let resolvedQuality: TranslationQuality = quality == "fast" ? .fast : .high
         let engine = TranslationEngine(quality: resolvedQuality)
+
+        if isDebug {
+            fputs("[debug] translate-cli starting\n", stderr)
+            let localeList = targetLocales.joined(separator: ",")
+            fputs("[debug] format=\(format) quality=\(quality) locales=\(localeList)\n", stderr)
+            fputs("[debug] input=\(input) output=\(output ?? "(default)")\n", stderr)
+        }
 
         // 2. Dispatch to format-specific handler.
         // Markdown is fully self-contained (stateless, no manifest). xcstrings and strings

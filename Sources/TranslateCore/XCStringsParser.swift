@@ -76,7 +76,11 @@ public enum XCStringsParser {
         // sortedKeys: stable git diffs — prevents key-order churn between runs
         // prettyPrinted: .xcstrings files are human-reviewed; compact JSON would be hostile
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let data = try encoder.encode(xcstrings)
+        // Append a trailing newline to match Xcode's output format.
+        // JSONEncoder does not emit one, so the first write of an Xcode-authored file
+        // would otherwise produce a 1-char diff (missing \n) — stable on all subsequent writes.
+        var data = try encoder.encode(xcstrings)
+        data.append(0x0A) // UTF-8 newline
         // Ensure parent directory exists before writing.
         // Call sites today always write to an existing directory (xcstrings: same dir as input;
         // strings: lproj dir created by writeOutput). This guard is defensive for future callers
