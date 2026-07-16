@@ -61,11 +61,13 @@ public enum ManifestHandler {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(manifest)
         let url = URL(filePath: path)
-        // Create parent directory if it doesn't exist (e.g. first run in a new repo structure)
+        // createDirectory(withIntermediateDirectories: true) is idempotent — it does NOT
+        // throw EEXIST when the directory already exists. Calling unconditionally (no
+        // fileExists pre-check) is therefore both correct and race-free: a pre-check
+        // would introduce a TOCTOU window where another process could create the dir
+        // between the check and the create, producing a spurious error.
         let dir = url.deletingLastPathComponent().path
-        if !FileManager.default.fileExists(atPath: dir) {
-            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        }
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         try data.write(to: url, options: .atomic)
     }
 }

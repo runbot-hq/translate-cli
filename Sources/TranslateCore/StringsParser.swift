@@ -82,6 +82,12 @@ public enum StringsParser {
                 // Xcode legitimately generates duplicate keys for plural variant entries in
                 // some .strings formats. Silently keeping the last value is the correct
                 // and intentional behaviour here.
+                // Warning (not error) so hand-authored files with accidental duplicates
+                // surface the issue without breaking the translation run.
+                if result[key] != nil {
+                    fputs("Warning: duplicate key '\(key)' in "
+                        + "\(url.lastPathComponent) — last occurrence wins.\n", stderr)
+                }
                 result[key] = value
             }
         }

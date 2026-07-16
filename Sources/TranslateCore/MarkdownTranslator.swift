@@ -32,9 +32,16 @@ import Foundation
 /// ⚠️ Known limitation: fenced code blocks (``` or ~~~) that contain a double-newline
 /// (`\n\n`) inside the fence are split across multiple chunks by `components(separatedBy: "\n\n")`.
 /// Only the first chunk (containing the opening fence marker) is detected and skipped;
-/// subsequent chunks (body/closing) are sent for translation. This is acceptable for
-/// typical release-notes content where code blocks rarely contain blank lines.
-/// Full CommonMark fidelity would require a proper block-level parser.
+/// subsequent chunks (body/closing) are sent for translation, producing silently corrupted
+/// output. No stderr warning is emitted because detection requires stateful line-by-line
+/// parsing across chunk boundaries — `shouldSkip` operates per-chunk with no cross-chunk
+/// state. This is acceptable for typical release-notes content where code blocks rarely
+/// contain blank lines.
+///
+/// v2 fix: replace `components(separatedBy: "\n\n")` with a line-by-line pass that tracks
+/// open-fence state (toggle on ``` / ~~~ lines) and emits chunks that never split an open
+/// fence. Alternatively, add a pre-scan regex over the raw content to detect affected
+/// blocks and emit a stderr warning before translation begins.
 public enum MarkdownTranslator {
 
     /// Translates `text` from `sourceLocale` to `targetLocale`.

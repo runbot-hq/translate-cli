@@ -8,6 +8,9 @@ import Foundation
 
 /// Merges translated results back into XCStrings and updates the translation manifest.
 public enum TranslationMerger {
+    // Cached: ISO8601DateFormatter construction is non-trivial (allocates Calendar + TimeZone).
+    // updateManifest is called once per run today, but static allocation is free and correct.
+    private static let isoFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
 
     /// Merges a locale's translated `[key: value]` slice back into the base XCStrings.
     ///
@@ -81,7 +84,7 @@ public enum TranslationMerger {
         xcstrings: XCStrings,
         completedLocales: [String]
     ) {
-        let now = ISO8601DateFormatter().string(from: Date())
+        let now = Self.isoFormatter.string(from: Date())
 
         for key in keys {
             guard let sourceValue = sourceValues[key] else { continue }
