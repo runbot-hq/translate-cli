@@ -13,7 +13,7 @@ swift build -c release
 # Binary at: .build/release/translate-cli
 ```
 
-Requires Swift 6 toolchain (Xcode 16+).
+Requires Xcode 26+ (macOS 26 SDK). The binary targets macOS 26 and uses `TranslationSession` / `LanguageAvailability` APIs that ship with macOS 26 — earlier Xcode versions will not have the required SDK.
 
 ## Usage
 
@@ -32,7 +32,7 @@ translate-cli --input <path> [--output <path>] [--languages <codes>] [--config <
 | `--languages` | — | Comma-separated target locale codes, e.g. `de,fr,ja,zh-Hans`. Overrides `--config`. |
 | `--config` | — | Path to `localization.config.json` with `targetLanguages` array |
 | `--manifest` | `dirname(input)/.translation-manifest.json` | Path to incremental manifest (created on first run) |
-| `--source-language` | From `.xcstrings` `sourceLanguage`, or `en` | Source language override |
+| `--source-language` | `xcstrings`/`markdown`: reads from `.xcstrings` file (no `en` fallback); `strings`: `en` | Source language override. Set only when the `.xcstrings` `sourceLanguage` field is wrong or for non-English `.strings` sources. |
 | `--quality` | `high` | `high` = highFidelity (Apple Intelligence); `fast` = lowLatency (NMT) |
 | `--format` | `xcstrings` | `xcstrings`, `strings`, or `markdown` |
 
