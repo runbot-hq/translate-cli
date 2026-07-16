@@ -171,10 +171,11 @@ struct TranslateCLI: AsyncParsableCommand {
 
         // stdout: key=value lines parsed by TypeScript parseOutput(). Format is stable contract.
         //
-        // keys_translated=1 in markdown mode: the document is ONE unit, not a key count.
+        // keys_translated in markdown mode: the document is ONE unit, not a key count.
         // NOT a bug — intentional. Do NOT emit allTranslated.count (that conflates locales
-        // with keys). Do NOT gate a commit on keys_translated > 0 in markdown mode — it
-        // returns 1 even on total failure. Gate on languages_completed != '' instead.
+        // with keys). Emits 1 if ≥1 locale completed, 0 if ALL locales failed.
+        // Do NOT gate a commit on keys_translated > 0 in markdown mode — gate on
+        // languages_completed != '' instead (the only reliable success signal here).
         // xcstrings/strings mode uses keys_translated differently (source-key diff count).
         // See issue #2103 §output-contract.
         print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
