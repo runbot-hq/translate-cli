@@ -77,6 +77,13 @@ public enum XCStringsParser {
         // prettyPrinted: .xcstrings files are human-reviewed; compact JSON would be hostile
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(xcstrings)
+        // Ensure parent directory exists before writing.
+        // Call sites today always write to an existing directory (xcstrings: same dir as input;
+        // strings: lproj dir created by writeOutput). This guard is defensive for future callers
+        // that may supply a novel output path — without it data.write throws ENOENT with no
+        // indication which directory was missing.
+        let dir = url.deletingLastPathComponent().path
+        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
         // .atomic: write to a temp file then rename — avoids a corrupt .xcstrings if interrupted
         try data.write(to: url, options: .atomic)
     }

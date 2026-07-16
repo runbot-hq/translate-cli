@@ -10,7 +10,14 @@ import Foundation
 public enum TranslationMerger {
     // Cached: ISO8601DateFormatter construction is non-trivial (allocates Calendar + TimeZone).
     // updateManifest is called once per run today, but static allocation is free and correct.
-    private static let isoFormatter: ISO8601DateFormatter = ISO8601DateFormatter()
+    // timeZone forced to UTC so manifests committed from runners in different system
+    // timezones produce identical translatedAt strings for the same moment.
+    // Without this, two runners (e.g. UTC and CEST) would generate spurious manifest diffs.
+    private static let isoFormatter: ISO8601DateFormatter = {
+        let fmt = ISO8601DateFormatter()
+        fmt.timeZone = TimeZone(identifier: "UTC")!
+        return fmt
+    }()
 
     /// Merges a locale's translated `[key: value]` slice back into the base XCStrings.
     ///

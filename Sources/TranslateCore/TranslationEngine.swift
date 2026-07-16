@@ -138,8 +138,14 @@ public actor TranslationEngine: Translating {
                 // Why `.unsupported` (throw + skip) rather than `.installed` (proceed)?
                 // Proceeding with an unrecognised status risks creating a TranslationSession
                 // in an undefined state — which could corrupt output silently. Skipping is the
-                // conservative, safe choice: the locale is retried on the next run, and the
-                // warning below tells the developer exactly what to fix.
+                // conservative, safe choice. Retry behaviour clarification:
+                //   Current run: the TypeScript action's isFatalTranslateError() matches
+                //   'unsupported language pair' and marks this locale FATAL — no current-run
+                //   retry. The locale is simply skipped for this run.
+                //   Next run: because the locale is skipped (not recorded in the manifest),
+                //   DiffExtractor will re-queue it and translate-cli will attempt it again.
+                //   So "retry" here means next-run retry, not within-run retry.
+                // The warning below tells the developer exactly what to fix.
                 //
                 // This is NOT a lazy catch-all. Each known status is handled explicitly above.
                 // @unknown default exists only for future Apple API additions we haven't seen yet.
