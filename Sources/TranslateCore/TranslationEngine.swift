@@ -103,8 +103,12 @@ public actor TranslationEngine {
                     target: targetLocale.identifier
                 )
             @unknown default:
-                // New availability status added by Apple — treat conservatively as unsupported
-                // so the caller skips the locale rather than attempting a translation that may panic.
+                // A new LanguageAvailability status was added by Apple that we don't recognise.
+                // Warn to stderr so the runner log captures it, then treat as unsupported so
+                // the caller skips this locale rather than attempting a translation that may panic.
+                // If you see this warning, check for a newer Apple Translation framework release
+                // and update the switch to handle the new case explicitly.
+                fputs("Warning: unrecognised LanguageAvailability status for \(sourceLocale.identifier) → \(targetLocale.identifier); treating as unsupported. Update TranslationEngine if a new status case was added.\n", stderr)
                 throw TranslationEngineError.unsupportedPair(
                     source: sourceLocale.identifier,
                     target: targetLocale.identifier

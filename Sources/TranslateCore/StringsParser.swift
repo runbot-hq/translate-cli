@@ -37,8 +37,13 @@ public enum StringsParser {
             let trimmed = line.trimmingCharacters(in: .whitespaces)
             if trimmed.hasPrefix("//") { continue }   // skip line comments
             if let match = try? linePattern.firstMatch(in: line) {
-                let key = String(match.output.1).replacingOccurrences(of: "\\\"", with: "\"")
-                let value = String(match.output.2).replacingOccurrences(of: "\\\"", with: "\"")
+                // Unescape \" → " and \\ → \ (order matters: unescape \\ first)
+                let key = String(match.output.1)
+                    .replacingOccurrences(of: "\\\\", with: "\\")
+                    .replacingOccurrences(of: "\\\"", with: "\"")
+                let value = String(match.output.2)
+                    .replacingOccurrences(of: "\\\\", with: "\\")
+                    .replacingOccurrences(of: "\\\"", with: "\"")
                 result[key] = value
             }
         }
@@ -46,11 +51,17 @@ public enum StringsParser {
     }
 
     /// Writes a `[key: value]` dictionary as a `.strings` file.
-    /// Keys are sorted for stable git diffs. Quotes inside keys/values are escaped.
+    /// Keys are sorted for stable git diffs.
+    /// Escape order: \ → \\ first, then " → \" — reversing this order would
+    /// double-escape the backslashes added in the first pass.
     public static func write(_ strings: [String: String], to url: URL) throws {
         let lines = strings.keys.sorted().map { key -> String in
-            let escapedKey = key.replacingOccurrences(of: "\"", with: "\\\"")
-            let escapedValue = strings[key]!.replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedKey = key
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            let escapedValue = strings[key]!
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
             return "\"\(escapedKey)\" = \"\(escapedValue)\";"
         }
         let content = lines.joined(separator: "\n") + "\n"

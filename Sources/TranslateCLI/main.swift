@@ -98,7 +98,13 @@ struct TranslateCLI: AsyncParsableCommand {
 
             // Output lines are parsed by the TypeScript action's parseOutput() function.
             // Format must remain key=value, one per line, no extra whitespace.
-            print("keys_translated=\(allTranslated.count)")
+            //
+            // keys_translated=1 in markdown mode: the document is one translatable unit.
+            // We do NOT emit allTranslated.count (number of locales) here — that would
+            // conflate "locales" with "keys" and confuse callers using this output to
+            // gate a commit step. The per-locale results are fully represented by
+            // languages_completed and languages_failed.
+            print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
             print("languages_completed=\(completedLocales.joined(separator: ","))")
             print("languages_failed=\(failedLocales.joined(separator: ","))")
             return
