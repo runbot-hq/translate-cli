@@ -43,7 +43,19 @@ struct TranslateCLI: AsyncParsableCommand {
     @Option(name: .customLong("source-language"), help: "Source language code override (default: read from .xcstrings sourceLanguage field, or 'en').")
     var sourceLanguage: String?
 
+    // --debug enables verbose stderr logging throughout the translation pipeline.
+    // This is intentionally a CLI flag (not an env var) so the action can control
+    // CLI verbosity independently of the runner's RUNNER_DEBUG infrastructure.
+    // Setting ACTIONS_STEP_DEBUG at runtime in the same process has no effect on
+    // core.isDebug() / core.debug() because the runner reads RUNNER_DEBUG at startup.
+    @Flag(name: .customLong("debug"), help: "Enable verbose debug logging to stderr.")
+    var debug: Bool = false
+
     mutating func run() async throws {
+        if debug {
+            fputs("[translate-cli] debug mode enabled\n", stderr)
+        }
+
         // 1. Resolve target locales
         // --languages takes precedence; fall back to --config; error if neither.
         let targetLocales: [String]
@@ -52,6 +64,7 @@ struct TranslateCLI: AsyncParsableCommand {
         } else if let configPath = config {
             let cfg = try LocalizationConfigLoader.load(from: configPath)
             targetLocales = cfg.targetLanguages
+            if debug { fputs("[translate-cli] loaded \(targetLocales.count) locales from config: \(targetLocales.joined(separator: ", "))\n", stderr) }
         } else {
             fputs("Error: provide --languages or --config\n", stderr)
             throw ExitCode.failure
@@ -73,6 +86,8 @@ struct TranslateCLI: AsyncParsableCommand {
         } else {
             outputPath = output ?? input
         }
+        if debug { fputs("[translate-cli] input=\(input) output=\(outputPath) format=\(format) quality=\(quality)\n", stderr) }
+
         let q: TranslationQuality = quality == "fast" ? .fast : .high
         let engine = TranslationEngine(quality: q)
 
@@ -88,6 +103,7 @@ struct TranslateCLI: AsyncParsableCommand {
 
             for localeCode in targetLocales {
                 let targetLocale = Locale(identifier: localeCode)
+                if debug { fputs("[translate-cli] translating markdown to \(localeCode)\n", stderr) }
                 do {
                     let result = try await MarkdownTranslator.translate(
                         text,
@@ -104,6 +120,7 @@ struct TranslateCLI: AsyncParsableCommand {
                     )
                     allTranslated.append("## \(localeCode)\n\n\(result)")
                     completedLocales.append(localeCode)
+                    if debug { fputs("[translate-cli] ✓ \(localeCode)\n", stderr) }
                 } catch {
                     fputs("Warning: failed to translate to \(localeCode): \(error)\n", stderr)
                     failedLocales.append(localeCode)
@@ -139,6 +156,7 @@ struct TranslateCLI: AsyncParsableCommand {
             manifestPath = inputURL.deletingLastPathComponent()
                 .appending(path: ".translation-manifest.json").path
         }
+        if debug { fputs("[translate-cli] manifest=\(manifestPath)\n", stderr) }
 
         // 4. Load source file.
         // .strings files are converted to an internal XCStrings representation so
@@ -173,6 +191,7 @@ struct TranslateCLI: AsyncParsableCommand {
             fputs("Error: unknown format \(format). Use xcstrings, strings, or markdown.\n", stderr)
             throw ExitCode.failure
         }
+        if debug { fputs("[translate-cli] sourceLocale=\(sourceLocale.identifier)\n", stderr) }
 
         // 5. Diff: find keys that need translation.
         // Returns [key: englishSourceValue] — value is stored in the manifest so future
@@ -183,6 +202,7 @@ struct TranslateCLI: AsyncParsableCommand {
             manifest: translationManifest,
             targetLocales: targetLocales
         )
+        if debug { fputs("[translate-cli] changedKeys=\(changedKeys.count)\n", stderr) }
 
         if changedKeys.isEmpty {
             // No keys changed — exit cleanly with zero counts. The action treats this as
@@ -201,6 +221,7 @@ struct TranslateCLI: AsyncParsableCommand {
 
         for localeCode in targetLocales {
             let targetLocale = Locale(identifier: localeCode)
+            if debug { fputs("[translate-cli] translating \(changedKeys.count) keys to \(localeCode)\n", stderr) }
             do {
                 let translated = try await engine.translate(
                     changedKeys,
@@ -213,6 +234,7 @@ struct TranslateCLI: AsyncParsableCommand {
                     locale: localeCode
                 )
                 completedLocales.append(localeCode)
+                if debug { fputs("[translate-cli] ✓ \(localeCode) (\(translated.count) keys)\n", stderr) }
             } catch {
                 fputs("Warning: failed to translate to \(localeCode): \(error)\n", stderr)
                 failedLocales.append(localeCode)
@@ -254,6 +276,7 @@ struct TranslateCLI: AsyncParsableCommand {
                 try StringsParser.write(out, to: stringsFile)
             }
         }
+        if debug { fputs("[translate-cli] wrote output to \(outputPath)\n", stderr) }
 
         // 8. Update manifest — only after all locales are processed so partial-success
         // runs record the correct completed-locales union rather than a premature snapshot.
@@ -271,6 +294,7 @@ struct TranslateCLI: AsyncParsableCommand {
                 completedLocales: completedLocales
             )
             try ManifestHandler.save(translationManifest, to: manifestPath)
+            if debug { fputs("[translate-cli] manifest saved to \(manifestPath)\n", stderr) }
         }
 
         // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
