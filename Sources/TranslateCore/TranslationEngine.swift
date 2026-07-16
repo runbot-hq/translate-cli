@@ -65,8 +65,20 @@ public protocol Translating: Actor {
 /// Wraps Apple's Translation framework for batch key→value translation.
 ///
 /// Declared as `actor` to satisfy Swift 6 concurrency requirements on `TranslationSession`
-/// usage — not because concurrent calls are safe. The per-locale loop in main.swift
-/// must remain sequential regardless of this actor wrapper.
+/// usage — NOT because concurrent calls are safe.
+///
+/// Why `actor` if it doesn't make concurrent calls safe?
+/// `TranslationSession` requires a specific actor-isolation pattern to compile under Swift 6
+/// strict concurrency. Without the `actor` keyword here, constructing and using a
+/// `TranslationSession` inside an `async` method triggers:
+///   "sending 'self'-isolated value to nonisolated context risks causing data races"
+/// The `actor` + `nonisolated runBatch` pattern resolves that diagnostic structurally
+/// (session is never actor-isolated — see runBatch comments). It does NOT add any
+/// thread-safety guarantee on top of what Apple's framework provides.
+///
+/// The per-locale loop in main.swift MUST remain a plain sequential `for` loop.
+/// Do NOT add concurrency (async let / TaskGroup) to that loop — TranslationSession
+/// is not safe to call from multiple concurrent tasks.
 public actor TranslationEngine: Translating {
     public let quality: TranslationQuality
 

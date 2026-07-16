@@ -144,10 +144,16 @@ struct TranslateCLI: AsyncParsableCommand {
         // Format must remain key=value, one per line, no extra whitespace.
         //
         // keys_translated=1 in markdown mode: the document is one translatable unit.
+        // This is NOT a bug or an off-by-one — it is intentional contract design.
         // We do NOT emit allTranslated.count (number of locales) here — that would
-        // conflate "locales" with "keys" and confuse callers using this output to
-        // gate a commit step. The per-locale results are fully represented by
-        // languages_completed and languages_failed.
+        // conflate "locales" with "keys", producing a misleading number (e.g. 5 for
+        // 5 locales when only 1 document was translated).
+        // IMPORTANT: do NOT gate a commit step on `keys_translated > 0` in markdown mode.
+        // keys_translated is 1 even when every locale fails (completedLocales.isEmpty).
+        // The correct gate is `languages_completed != ''` — that reflects actual output.
+        // The xcstrings/strings runStructured path uses keys_translated differently
+        // (count of source keys changed); this markdown-specific semantics is intentional
+        // and is documented in issue #2103 §output-contract.
         print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
         print("languages_completed=\(completedLocales.joined(separator: ","))")
         print("languages_failed=\(failedLocales.joined(separator: ","))")
@@ -259,15 +265,19 @@ struct TranslateCLI: AsyncParsableCommand {
         // keys_translated = changedKeys.count (keys that needed translation, pre-flight diff).
         // This is intentionally NOT "keys that succeeded per locale" and NOT
         // "keys × locales" — it is the number of source strings that had changes, computed
-        // once before the translation loop. A partial locale failure does not reduce this
-        // count; that information is fully represented by languages_failed.
+        // once before the translation loop. A partial or total locale failure does NOT
+        // reduce this count; that information is fully represented by languages_failed.
+        //
+        // ⚠️ keys_translated > 0 does NOT mean any output was written.
+        // If every locale fails, keys_translated is still changedKeys.count and
+        // languages_completed is empty. Do NOT gate commit/PR steps on keys_translated.
         //
         // The authoritative post-run result is:
         //   languages_completed — locales written to disk and recorded in manifest
         //   languages_failed    — locales that errored OR had all-empty output; retried next run
         //
-        // Callers must gate commit/PR steps on languages_completed being non-empty,
-        // NOT on keys_translated being > 0 (which can be true even if every locale failed).
+        // Correct caller gate:  `languages_completed != ''`
+        // Wrong caller gate:    `keys_translated > 0`   ← true even when nothing was written
         // This design is documented in issue #2103 §output-contract.
         print("keys_translated=\(changedKeys.count)")
         print("languages_completed=\(writtenLocales.joined(separator: ","))")
