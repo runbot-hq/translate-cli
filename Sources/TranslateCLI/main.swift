@@ -28,12 +28,10 @@ struct TranslateCLI: AsyncParsableCommand {
     @Option(help: "Path to localization.config.json — CLI reads targetLanguages directly from this file.")
     var config: String?
 
-    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. "
-        + "Takes precedence over --config if both are provided.")
+    @Option(help: "Comma-separated target locale codes, e.g. de,fr,ja. Takes precedence over --config if both are provided.")
     var languages: String?
 
-    @Option(help: "Translation quality: high (Apple Intelligence / highFidelity, requires macOS 26.4+) "
-        + "or fast (lowLatency NMT).")
+    @Option(help: "Translation quality: high (Apple Intelligence / highFidelity, requires macOS 26.4+) or fast (lowLatency NMT).")
     var quality: String = "high"
 
     @Option(help: "Input format: xcstrings | strings | markdown.")
@@ -42,29 +40,24 @@ struct TranslateCLI: AsyncParsableCommand {
     // --source-language overrides the sourceLanguage field read from the .xcstrings file.
     // Required when translating .strings files (which have no embedded source language)
     // and when the .xcstrings sourceLanguage field does not match the actual source.
-    @Option(name: .customLong("source-language"),
-        help: "Source language code override (default: read from .xcstrings sourceLanguage field, or 'en').")
+    @Option(name: .customLong("source-language"), help: "Source language code override (default: read from .xcstrings sourceLanguage field, or 'en').")
     var sourceLanguage: String?
 
     // --debug enables verbose stderr logging throughout the translation pipeline.
-    // This is a CLI flag (not an env var) so the action can control CLI verbosity
-    // independently of the runner's RUNNER_DEBUG infrastructure.
+    // This is intentionally a CLI flag (not an env var) so the action can control
+    // CLI verbosity independently of the runner's RUNNER_DEBUG infrastructure.
     // Setting ACTIONS_STEP_DEBUG at runtime in the same process has no effect on
-    // core.isDebug() because the runner reads RUNNER_DEBUG at process startup.
+    // core.isDebug() / core.debug() because the runner reads RUNNER_DEBUG at startup.
     @Flag(name: .customLong("debug"), help: "Enable verbose debug logging to stderr.")
     var debug: Bool = false
 
     mutating func run() async throws {
-        if debug { fputs("[translate-cli] debug mode enabled\n", stderr) }
+        if debug {
+            fputs("[translate-cli] debug mode enabled\n", stderr)
+        }
 
-        // 1. Resolve target locales.
+        // 1. Resolve target locales
         // --languages takes precedence; fall back to --config; error if neither.
-        //
-        // Note: this step runs BEFORE the --format check (step 2 below). This means that
-        // passing `--format markdown` without `--languages` or `--config` will produce
-        // "Error: provide --languages or --config" before the markdown path is reached.
-        // This is intentional — all formats need a target locale list, and resolving it
-        // first gives a clear, actionable error regardless of format.
         let targetLocales: [String]
         if let langs = languages, !langs.isEmpty {
             targetLocales = langs.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
@@ -95,92 +88,48 @@ struct TranslateCLI: AsyncParsableCommand {
         }
         if debug { fputs("[translate-cli] input=\(input) output=\(outputPath) format=\(format) quality=\(quality)\n", stderr) }
 
-        let resolvedQuality: TranslationQuality = quality == "fast" ? .fast : .high
-        let engine = TranslationEngine(quality: resolvedQuality)
+        let q: TranslationQuality = quality == "fast" ? .fast : .high
+        let engine = TranslationEngine(quality: q)
 
-        // 2. Dispatch to format-specific handler.
-        // Markdown is fully self-contained (stateless, no manifest). xcstrings and strings
-        // share the diff/merge/manifest pipeline and are handled together in runStructured.
+        // 2. Markdown mode — stateless, no manifest read/write.
         if format == "markdown" {
-            try await runMarkdown(targetLocales: targetLocales, outputPath: outputPath, engine: engine)
-        } else {
-            try await runStructured(targetLocales: targetLocales, outputPath: outputPath, engine: engine)
-        }
-    }
+            let text = try String(contentsOfFile: input, encoding: .utf8)
+            var allTranslated: [String] = []
+            var completedLocales: [String] = []
+            var failedLocales: [String] = []
 
-    // MARK: - Format handlers
-
-    /// Handles `--format markdown` translation.
-    /// Stateless — no manifest is read or written.
-    private func runMarkdown(
-        targetLocales: [String],
-        outputPath: String,
-        engine: TranslationEngine
-    ) async throws {
-        // input_text integration (used by the release-notes pipeline) passes content
-        // as a file path with --format markdown; the action writes a temp file and
-        // passes its path here.
-        let text = try String(contentsOfFile: input, encoding: .utf8)
-        var allTranslated: [String] = []
-        var completedLocales: [String] = []
-        var failedLocales: [String] = []
-
-        for localeCode in targetLocales {
-            let targetLocale = Locale(identifier: localeCode)
-            if debug { fputs("[translate-cli] translating markdown to \(localeCode)\n", stderr) }
-            do {
-                let result = try await MarkdownTranslator.translate(
-                    text,
-                    // "en" default is correct for the current release-notes use case (always
-                    // English source). Markdown has no embedded source-language field, so we
-                    // cannot auto-detect it the way xcstrings mode does via xcstrings.sourceLanguage.
-                    // If markdown ever needs non-English source support, change this to an explicit
-                    // error when --source-language is omitted rather than silently defaulting to "en".
-                    // xcstrings and strings modes are NOT affected — they handle source language
-                    // independently and do not reach this code path.
-                    from: Locale(identifier: sourceLanguage ?? "en"),
-                    to: targetLocale,
-                    using: engine
-                )
-                allTranslated.append("## \(localeCode)\n\n\(result)")
-                completedLocales.append(localeCode)
-                if debug { fputs("[translate-cli] ✓ \(localeCode)\n", stderr) }
-            } catch {
-                fputs("Warning: failed to translate to \(localeCode): \(error)\n", stderr)
-                failedLocales.append(localeCode)
+            for localeCode in targetLocales {
+                let targetLocale = Locale(identifier: localeCode)
+                if debug { fputs("[translate-cli] translating markdown to \(localeCode)\n", stderr) }
+                do {
+                    let result = try await MarkdownTranslator.translate(
+                        text,
+                        from: Locale(identifier: sourceLanguage ?? "en"),
+                        to: targetLocale,
+                        using: engine
+                    )
+                    allTranslated.append("## \(localeCode)\n\n\(result)")
+                    completedLocales.append(localeCode)
+                    if debug { fputs("[translate-cli] ✓ \(localeCode)\n", stderr) }
+                } catch {
+                    fputs("Warning: failed to translate to \(localeCode): \(error)\n", stderr)
+                    failedLocales.append(localeCode)
+                }
             }
+
+            let combined = allTranslated.joined(separator: "\n\n---\n\n")
+            try combined.write(toFile: outputPath, atomically: true, encoding: .utf8)
+
+            print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
+            print("languages_completed=\(completedLocales.joined(separator: ","))")
+            print("languages_failed=\(failedLocales.joined(separator: ","))")
+            return
         }
 
-        let combined = allTranslated.joined(separator: "\n\n---\n\n")
-        try combined.write(toFile: outputPath, atomically: true, encoding: .utf8)
-
-        // Output lines are parsed by the TypeScript action's parseOutput() function.
-        // Format must remain key=value, one per line, no extra whitespace.
-        //
-        // keys_translated=1 in markdown mode: the document is one translatable unit.
-        // We do NOT emit allTranslated.count (number of locales) here — that would
-        // conflate "locales" with "keys" and confuse callers using this output to
-        // gate a commit step. The per-locale results are fully represented by
-        // languages_completed and languages_failed.
-        print("keys_translated=\(completedLocales.isEmpty ? 0 : 1)")
-        print("languages_completed=\(completedLocales.joined(separator: ","))")
-        print("languages_failed=\(failedLocales.joined(separator: ","))")
-    }
-
-    /// Handles `--format xcstrings` and `--format strings` translation.
-    /// Both formats share the diff/merge/manifest pipeline.
-    private func runStructured(
-        targetLocales: [String],
-        outputPath: String,
-        engine: TranslationEngine
-    ) async throws {
         // 3. Resolve manifest path.
-        // Default: dirname(input)/.translation-manifest.json — always co-located with the
-        // .xcstrings file so it's committed to the repo in the natural place.
-        // --manifest overrides this for non-standard repo layouts.
         let manifestPath: String
-        if let manifestOverride = manifest {
-            manifestPath = manifestOverride
+        if let m = manifest {
+            manifestPath = m
         } else {
             let inputURL = URL(filePath: input)
             manifestPath = inputURL.deletingLastPathComponent()
@@ -188,15 +137,30 @@ struct TranslateCLI: AsyncParsableCommand {
         }
         if debug { fputs("[translate-cli] manifest=\(manifestPath)\n", stderr) }
 
-        // 4. Load source file (format-specific parsing extracted to loadSource).
-        // FUTURE: Both loadSource and writeOutput must be updated together when adding formats.
-        let (xcstringsLoaded, sourceLocale) = try loadSource()
-        var xcstrings = xcstringsLoaded
+        // 4. Load source file.
+        var xcstrings: XCStrings
+        var stringsDict: [String: String] = [:]
+        let sourceLocale: Locale
+
+        if format == "xcstrings" {
+            xcstrings = try XCStringsParser.parse(from: URL(filePath: input))
+            sourceLocale = Locale(identifier: sourceLanguage ?? xcstrings.sourceLanguage)
+        } else if format == "strings" {
+            stringsDict = try StringsParser.parse(from: URL(filePath: input))
+            let srcLang = sourceLanguage ?? "en"
+            xcstrings = XCStrings(sourceLanguage: srcLang, strings: stringsDict.reduce(into: [:]) { acc, kv in
+                acc[kv.key] = XCStringEntry(localizations: [
+                    srcLang: XCLocalization(stringUnit: XCStringUnit(state: "new", value: kv.value))
+                ])
+            })
+            sourceLocale = Locale(identifier: srcLang)
+        } else {
+            fputs("Error: unknown format \(format). Use xcstrings, strings, or markdown.\n", stderr)
+            throw ExitCode.failure
+        }
         if debug { fputs("[translate-cli] sourceLocale=\(sourceLocale.identifier)\n", stderr) }
 
         // 5. Diff: find keys that need translation.
-        // Returns [key: sourceValue] — value is stored in the manifest so future
-        // runs can detect source-string changes without re-reading the xcstrings file.
         var translationManifest = try ManifestHandler.load(from: manifestPath)
         let changedKeys = DiffExtractor.changedKeys(
             xcstrings: xcstrings,
@@ -206,145 +170,39 @@ struct TranslateCLI: AsyncParsableCommand {
         if debug { fputs("[translate-cli] changedKeys=\(changedKeys.count)\n", stderr) }
 
         if changedKeys.isEmpty {
-            // No keys changed — exit cleanly with zero counts. The action treats this as
-            // a no-op (no commit, no PR) rather than a failure.
             print("keys_translated=0")
             print("languages_completed=")
             print("languages_failed=")
             return
         }
 
-        // 6. Translate — SEQUENTIAL. See translateAllLocales for concurrency warning.
-        let (completedLocales, failedLocales) = await translateAllLocales(
-            changedKeys: changedKeys,
-            sourceLocale: sourceLocale,
-            targetLocales: targetLocales,
-            engine: engine,
-            xcstrings: &xcstrings
-        )
+        // 6. Translate — SEQUENTIAL, one locale at a time. See concurrency warning above.
+        var completedLocales: [String] = []
+        var failedLocales: [String] = []
 
-        // 7. Write output (format-specific write extracted to writeOutput).
-        // ⚠️ Atomicity gap: step 7 (write output) and step 8 (save manifest) are NOT atomic.
-        // If killed between them the next run will re-translate — safe by design.
-        try writeOutput(xcstrings: xcstrings, completedLocales: completedLocales, outputPath: outputPath)
-        if debug { fputs("[translate-cli] wrote output to \(outputPath)\n", stderr) }
-
-        // 8. Update manifest — only after all locales are processed so partial-success
-        // runs record the correct completed-locales union rather than a premature snapshot.
-        // Guard: skip manifest write entirely when every locale failed. Writing with an
-        // empty completedLocales array would bump translatedAt timestamps without any
-        // translation having occurred, making the audit log misleading. On the next run,
-        // DiffExtractor will still flag the same keys (no target locale in manifest) and
-        // retranslation will proceed correctly — so skipping here is safe.
-        if !completedLocales.isEmpty {
-            TranslationMerger.updateManifest(
-                &translationManifest,
-                keys: Array(changedKeys.keys),
-                sourceValues: changedKeys,
-                xcstrings: xcstrings,
-                completedLocales: completedLocales
-            )
-            try ManifestHandler.save(translationManifest, to: manifestPath)
-            if debug { fputs("[translate-cli] manifest saved to \(manifestPath)\n", stderr) }
-        }
-
-        // 9. Stdout output — parsed by TypeScript action's parseOutput() function.
-        //
-        // keys_translated = changedKeys.count (keys that needed translation, pre-flight diff).
-        // This is intentionally NOT "keys that succeeded per locale" and NOT
-        // "keys × locales" — it is the number of source strings that had changes, computed
-        // once before the translation loop. A partial locale failure does not reduce this
-        // count; that information is fully represented by languages_failed.
-        //
-        // The authoritative post-run result is:
-        //   languages_completed — locales that were written and committed
-        //   languages_failed    — locales that errored; will be retried on next run
-        //
-        // Callers must gate commit/PR steps on languages_completed being non-empty,
-        // NOT on keys_translated being > 0 (which can be true even if every locale failed).
-        // This design is documented in issue #2103 §output-contract.
-        print("keys_translated=\(changedKeys.count)")
-        print("languages_completed=\(completedLocales.joined(separator: ","))")
-        print("languages_failed=\(failedLocales.joined(separator: ","))")
-    }
-
-    // MARK: - Translation loop
-
-    /// Translates `changedKeys` into each target locale SEQUENTIALLY and merges results into `xcstrings`.
-    ///
-    /// ⚠️ DO NOT parallelise. TranslationSession is not concurrency-safe — parallel calls
-    /// silently corrupt translations with no runtime error. The actor on TranslationEngine
-    /// satisfies Swift 6 checks but does NOT make concurrent locale calls safe.
-    ///
-    /// Returns `(completedLocales, failedLocales)`.
-    private func translateAllLocales(
-        changedKeys: [String: String],
-        sourceLocale: Locale,
-        targetLocales: [String],
-        engine: TranslationEngine,
-        xcstrings: inout XCStrings
-    ) async -> ([String], [String]) {
-        var completed: [String] = []
-        var failed: [String] = []
         for localeCode in targetLocales {
+            let targetLocale = Locale(identifier: localeCode)
             if debug { fputs("[translate-cli] translating \(changedKeys.count) keys to \(localeCode)\n", stderr) }
             do {
                 let translated = try await engine.translate(
-                    changedKeys, from: sourceLocale, to: Locale(identifier: localeCode))
-                xcstrings = TranslationMerger.merge(base: xcstrings, slice: translated, locale: localeCode)
-                completed.append(localeCode)
+                    changedKeys,
+                    from: sourceLocale,
+                    to: targetLocale
+                )
+                xcstrings = TranslationMerger.merge(
+                    base: xcstrings,
+                    slice: translated,
+                    locale: localeCode
+                )
+                completedLocales.append(localeCode)
                 if debug { fputs("[translate-cli] ✓ \(localeCode) (\(translated.count) keys)\n", stderr) }
             } catch {
                 fputs("Warning: failed to translate to \(localeCode): \(error)\n", stderr)
-                failed.append(localeCode)
+                failedLocales.append(localeCode)
             }
         }
-        return (completed, failed)
-    }
 
-    // MARK: - Source loading
-
-    /// Parses the input file into an XCStrings value and resolves the source locale.
-    /// Supports `xcstrings` and `strings` formats.
-    ///
-    /// `.strings` files have no embedded source-language field. Defaulting to "en" here
-    /// is intentional for that format only. Do NOT apply the same logic to `xcstrings`,
-    /// which reads sourceLanguage from file metadata.
-    private func loadSource() throws -> (XCStrings, Locale) {
-        if format == "xcstrings" {
-            let xcstrings = try XCStringsParser.parse(from: URL(filePath: input))
-            return (xcstrings, Locale(identifier: sourceLanguage ?? xcstrings.sourceLanguage))
-        } else if format == "strings" {
-            let stringsDict = try StringsParser.parse(from: URL(filePath: input))
-            let srcLang = sourceLanguage ?? "en"
-            // Wrap flat [key: value] dict in XCStrings so the diff/merge pipeline is format-agnostic.
-            let xcstrings = XCStrings(
-                sourceLanguage: srcLang,
-                strings: stringsDict.reduce(into: [:]) { acc, entry in
-                    acc[entry.key] = XCStringEntry(localizations: [
-                        srcLang: XCLocalization(stringUnit: XCStringUnit(state: "new", value: entry.value))
-                    ])
-                }
-            )
-            return (xcstrings, Locale(identifier: srcLang))
-        } else {
-            fputs("Error: unknown format \(format). Use xcstrings, strings, or markdown.\n", stderr)
-            throw ExitCode.failure
-        }
-    }
-
-    // MARK: - Output writing
-
-    /// Writes translated XCStrings to disk in the appropriate format.
-    ///
-    /// For `strings` format one file is written per completed locale under
-    /// `{outputPath}/{locale}.lproj/{inputFilename}.strings` to avoid the overwrite
-    /// bug where successive locales would clobber a single output path.
-    private func writeOutput(
-        xcstrings: XCStrings,
-        completedLocales: [String],
-        outputPath: String
-    ) throws {
+        // 7. Write output.
         if format == "xcstrings" {
             try XCStringsParser.write(xcstrings, to: URL(filePath: outputPath))
         } else if format == "strings" {
@@ -365,5 +223,24 @@ struct TranslateCLI: AsyncParsableCommand {
                 try StringsParser.write(out, to: stringsFile)
             }
         }
+        if debug { fputs("[translate-cli] wrote output to \(outputPath)\n", stderr) }
+
+        // 8. Update manifest.
+        if !completedLocales.isEmpty {
+            TranslationMerger.updateManifest(
+                &translationManifest,
+                keys: Array(changedKeys.keys),
+                sourceValues: changedKeys,
+                xcstrings: xcstrings,
+                completedLocales: completedLocales
+            )
+            try ManifestHandler.save(translationManifest, to: manifestPath)
+            if debug { fputs("[translate-cli] manifest saved to \(manifestPath)\n", stderr) }
+        }
+
+        // 9. Stdout output — parsed by TypeScript action's parseOutput().
+        print("keys_translated=\(changedKeys.count)")
+        print("languages_completed=\(completedLocales.joined(separator: ","))")
+        print("languages_failed=\(failedLocales.joined(separator: ","))")
     }
 }
