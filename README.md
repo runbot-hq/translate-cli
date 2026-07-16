@@ -48,6 +48,17 @@ languages_failed=
 
 Warnings and errors go to stderr.
 
+> **Important — commit gate:** `keys_translated` is a *pre-flight diff count* (the number of
+> source strings that changed). It can be `> 0` even when every locale failed. **Always gate
+> commit or PR steps on `languages_completed` being non-empty**, not on `keys_translated > 0`.
+> `languages_completed` is empty when every locale failed, regardless of how many keys were diffed.
+
+> **Markdown format limitation (v1):** Fenced code blocks that contain blank lines (`\n\n`
+> inside the fence) will be split into multiple chunks by the paragraph splitter. Only the
+> opening chunk (starting with ` ``` `) is skipped; interior chunks are sent to the translation
+> engine. This is a known v1 limitation. Avoid blank lines inside fenced code blocks in
+> documents translated with `--format markdown`.
+
 ## Examples
 
 ### Translate an `.xcstrings` file in-place
