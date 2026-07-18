@@ -18,7 +18,9 @@ public enum TranslationMerger {
     // never mutated, so there is no actual data race — nonisolated(unsafe) is correct here.
     private nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let fmt = ISO8601DateFormatter()
-        fmt.timeZone = TimeZone(identifier: "UTC")!
+        // TimeZone(secondsFromGMT: 0) is crash-safe (no Optional); avoids the force-unwrap
+        // that TimeZone(identifier: "UTC")! would require.
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
         return fmt
     }()
 
