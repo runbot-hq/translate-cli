@@ -33,6 +33,8 @@ jobs:
     runs-on: macos-26
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
 
     steps:
       - uses: actions/checkout@v4
@@ -51,12 +53,15 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Pull before committing so we rebase onto the current remote HEAD,
+          # not onto our local pre-build state. Matches the correct ordering:
+          # sync first, then stage and commit, then push.
+          git pull --rebase origin main
           git add translate-cli-bin
           if git diff --cached --quiet; then
             echo "Binary unchanged — nothing to commit."
           else
             git commit -m "chore: rebuild translate-cli-bin"
-            git pull --rebase origin main
             git push origin HEAD:main
           fi
 
@@ -65,33 +70,46 @@ jobs:
           git tag -f v1
           git push origin v1 --force
 
+      - name: Capture tag for release job
+        id: tag
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      # Pass the binary as an artifact to the release job instead of
+      # re-checking out main there. A checkout with ref:main in the release job
+      # has a narrow race window where it may resolve to the pre-build HEAD and
+      # upload a stale binary. Artifact passing guarantees the release job gets
+      # exactly the binary this build job compiled.
+      - name: Upload binary as workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: translate-cli-bin
+          path: translate-cli-bin
+          retention-days: 1
+
   release:
     needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - name: Download binary artifact
+        uses: actions/download-artifact@v4
         with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Get version from latest tag
-        id: version
-        run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          name: translate-cli-bin
 
       - name: Upload translate-cli-bin as release asset
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          TAG=${{ steps.version.outputs.tag }}
-          if gh release view "$TAG" > /dev/null 2>&1; then
-            gh release upload "$TAG" translate-cli-bin --clobber
+          chmod +x translate-cli-bin
+          TAG=${{ needs.build.outputs.tag }}
+          if gh release view "$TAG" --repo runbot-hq/translate-cli > /dev/null 2>&1; then
+            gh release upload "$TAG" translate-cli-bin --clobber --repo runbot-hq/translate-cli
           else
             gh release create "$TAG" translate-cli-bin \
               --title "$TAG" \
               --notes "Prebuilt translate-cli-bin binary for macOS arm64. Requires macOS 26+ with Apple Translation framework." \
-              --target main
+              --repo runbot-hq/translate-cli
           fi
