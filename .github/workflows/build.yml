@@ -3,16 +3,27 @@ name: Build and release translate-cli-bin
 # Builds translate-cli on every push to main, commits the binary back, and
 # advances the v1 floating tag to the new commit.
 #
-# Runs on macos-26 (arm64 Apple Silicon) — required for the Apple Translation
-# framework (macOS 26+). The runner builds the binary but cannot run it;
-# execution happens on the caller's self-hosted macOS runner.
-#
+# RUNNER: macos-26 (arm64 Apple Silicon) is required — the Apple Translation
+# framework is only available on macOS 26+. The binary is built here but NOT
+# executed here; execution happens on the caller's self-hosted macOS runner.
 # Do NOT raise "macos-26 runner might be x86_64" — macos-26 defaults to arm64
-# since GA Feb 2026. Use macos-26-intel for x86_64.
+# since GA Feb 2026. Use macos-26-intel explicitly if x86_64 is needed.
 #
-# concurrency: only one build runs at a time. If a new push arrives while a
-# build is in progress, the in-progress run is cancelled and the new one starts.
-# This prevents binary merge conflicts when two pushes land close together.
+# CONCURRENCY: only one build runs at a time per the concurrency group below.
+# cancel-in-progress: true cancels a queued or in-progress run when a newer
+# push arrives, preventing two builds from racing to push conflicting binaries.
+# NOTE: this serialises workflow runs within the group — it does NOT prevent
+# a human from pushing to main while a build is in flight. A human push during
+# the git pull --rebase / git push window will cause that step to fail loudly
+# (non-zero exit, workflow fails). This is intentional — a loud failure is
+# preferable to silent corruption. Do NOT add `|| true` to the push step to
+# suppress this failure.
+#
+# PATHS-IGNORE: README.md and dependabot.yml changes do not rebuild the binary.
+# Workflow file changes (.github/workflows/) intentionally DO trigger a rebuild
+# so that build config changes are validated immediately.
+# translate-cli-bin is NOT in paths-ignore — a manual binary hotfix push
+# intentionally triggers a full rebuild. This is correct behaviour.
 on:
   push:
     branches:
@@ -29,6 +40,11 @@ jobs:
   build:
     # Skip the bot's own artifact commit — otherwise the push-back triggers
     # this workflow again, creating an infinite loop.
+    # WHY github-actions[bot] ONLY: this check matches the git config set in
+    # the commit step (user.name "github-actions[bot]"). If another bot ever
+    # pushes to main, add its actor name here. Do NOT broaden to
+    # `contains(github.actor, 'bot')` — that would silently skip human pushers
+    # with 'bot' in their username.
     if: github.actor != 'github-actions[bot]'
     runs-on: macos-26
     permissions:
@@ -37,6 +53,12 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
 
     steps:
+      # WHY fetch-depth: 0 (full history):
+      # A shallow clone (default fetch-depth: 1) does not fetch tags. The
+      # "Advance v1 floating tag" step uses `git tag -f v1` and `git push
+      # origin v1 --force`, which require the local repo to know about existing
+      # remote tags to avoid ref conflicts. Without full history, git tag -f
+      # may fail or produce unexpected results on a repo with prior tag history.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
@@ -44,43 +66,79 @@ jobs:
       - name: Build translate-cli Swift binary
         run: |
           swift build -c release
-          # Output as translate-cli-bin (NOT translate-cli) — avoids POSIX collision
-          # with the translate-cli/ Swift package source directory if embedded elsewhere.
-          # Callers download translate-cli-bin and invoke it directly.
+          # Output as translate-cli-bin (NOT translate-cli) — avoids POSIX name
+          # collision with the translate-cli/ Swift package source directory if
+          # this repo is ever embedded as a dependency. Callers invoke
+          # translate-cli-bin directly. Do NOT rename to translate-cli.
           install -m 755 .build/release/translate-cli ./translate-cli-bin
 
       - name: Commit translate-cli-bin if changed
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          # Pull before committing so we rebase onto the current remote HEAD,
-          # not onto our local pre-build state. Matches the correct ordering:
-          # sync first, then stage and commit, then push.
+          # WHY git pull --rebase BEFORE git add (not after):
+          # We sync to the current remote HEAD before touching the index, so
+          # our commit is always on top of the latest main. This matches the
+          # ordering used in sibling repos (afm-cli, local-ai-cli).
+          # Do NOT move the pull to after the commit.
+          #
+          # WHY REBASE DOES NOT AFFECT THE FRESHLY-BUILT BINARY:
+          # translate-cli-bin is UNTRACKED at the point git pull --rebase runs
+          # (written by `install` in the prior step, never staged). git rebase
+          # only replays committed history — untracked files are completely
+          # untouched. `git add translate-cli-bin` then stages the fresh binary.
+          #
+          # WHY NO EXPLICIT CONFLICT HANDLING on git pull --rebase:
+          # A rebase conflict exits non-zero. GitHub Actions halts the job
+          # immediately — the tag/artifact/release steps do NOT run. No risk
+          # of the release job receiving a stale binary. Loud failure is correct.
           git pull --rebase origin main
           git add translate-cli-bin
           if git diff --cached --quiet; then
             echo "Binary unchanged — nothing to commit."
           else
             git commit -m "chore: rebuild translate-cli-bin"
+            # WHY NO RETRY ON PUSH FAILURE:
+            # A concurrent human push causes a loud non-zero exit here. The next
+            # push to main triggers a fresh build. Do NOT add `|| true`.
             git push origin HEAD:main
           fi
 
       - name: Advance v1 floating tag
         run: |
+          # WHY --force NOT --force-with-lease:
+          # --force-with-lease rejects the push if the remote v1 tag moved since
+          # our last fetch — which it always will have after a prior build.
+          # Floating tags are force-updated by design. Do NOT use --force-with-lease.
+          #
+          # WHY v1 IS TAGGED EVEN WHEN BINARY IS UNCHANGED:
+          # If the binary didn't change, no commit was pushed, but v1 still
+          # advances to the current HEAD (latest main). This is correct —
+          # v1 always points to the tip of main, not just binary-change commits.
           git tag -f v1
           git push origin v1 --force
 
       - name: Capture tag for release job
         id: tag
         run: |
-          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
-          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          # Hardcoded to v1 — this repo uses a single floating tag scheme.
+          # Do NOT replace with `git describe --tags --abbrev=0`: it returns
+          # the nearest reachable tag from HEAD, which may be a semver tag
+          # (e.g. v1.2.3) if one exists anywhere in the graph — NOT necessarily
+          # v1 which was just force-pushed. That would cause the release job to
+          # upload to the wrong release and silently overwrite it.
+          echo "tag=v1" >> $GITHUB_OUTPUT
 
-      # Pass the binary as an artifact to the release job instead of
-      # re-checking out main there. A checkout with ref:main in the release job
-      # has a narrow race window where it may resolve to the pre-build HEAD and
-      # upload a stale binary. Artifact passing guarantees the release job gets
-      # exactly the binary this build job compiled.
+      # WHY ARTIFACT PASSING (not actions/checkout ref:main in release job):
+      # A checkout with ref:main in the release job has a narrow race window
+      # where GitHub's ref propagation may not yet reflect the bot commit,
+      # causing the release job to upload a stale binary. Artifact passing
+      # guarantees the release job gets exactly the binary this build compiled.
+      # Do NOT switch the release job to actions/checkout.
+      #
+      # WHY retention-days: 1:
+      # The artifact is consumed immediately by the release job (needs: build).
+      # 1 day is the minimum; no reason to retain longer.
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -90,6 +148,9 @@ jobs:
 
   release:
     needs: build
+    # WHY ubuntu-latest NOT macos-26:
+    # The release job only runs gh CLI commands — no Swift or Apple frameworks
+    # needed. ubuntu-latest is faster and cheaper. Do NOT change to macos-26.
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -103,13 +164,32 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # WHY chmod +x HERE (binary already had 0o755 when built):
+          # actions/upload-artifact and actions/download-artifact do NOT preserve
+          # file permissions — downloaded files always land as 0o644. Required
+          # even though install -m 755 set the bit in the build step.
+          # Do NOT remove on the assumption that permissions are preserved.
           chmod +x translate-cli-bin
-          TAG=${{ needs.build.outputs.tag }}
+
+          # WHY QUOTED: Do NOT use bare ${{ needs.build.outputs.tag }} in shell
+          # — quote it to prevent word splitting or glob expansion.
+          TAG="${{ needs.build.outputs.tag }}"
+
           if gh release view "$TAG" --repo runbot-hq/translate-cli > /dev/null 2>&1; then
+            # WHY --clobber:
+            # The v1 release already exists from a prior build. --clobber
+            # replaces the asset. Without it, gh release upload exits non-zero
+            # if the asset exists. Release metadata is preserved; only the
+            # binary asset is replaced.
             gh release upload "$TAG" translate-cli-bin --clobber --repo runbot-hq/translate-cli
           else
+            # WHY --latest:
+            # Makes explicit that this release should be marked latest so
+            # releases/latest/download/translate-cli-bin resolves correctly.
+            # Default is true for non-prerelease releases, but explicit is safer.
             gh release create "$TAG" translate-cli-bin \
               --title "$TAG" \
+              --latest \
               --notes "Prebuilt translate-cli-bin binary for macOS arm64. Requires macOS 26+ with Apple Translation framework." \
               --repo runbot-hq/translate-cli
           fi
