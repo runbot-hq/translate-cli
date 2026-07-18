@@ -17,7 +17,8 @@ name: Build and release translate-cli-bin
 # the git pull --rebase / git push window will cause that step to fail loudly
 # (non-zero exit, workflow fails). This is intentional — a loud failure is
 # preferable to silent corruption. Do NOT add `|| true` to the push step to
-# suppress this failure.
+# suppress this failure. The next human push to main will trigger a fresh
+# build automatically — no manual intervention needed.
 #
 # PATHS-IGNORE: README.md and dependabot.yml changes do not rebuild the binary.
 # Workflow file changes (.github/workflows/) intentionally DO trigger a rebuild
@@ -40,6 +41,16 @@ jobs:
   build:
     # Skip the bot's own artifact commit — otherwise the push-back triggers
     # this workflow again, creating an infinite loop.
+    #
+    # WHY github.actor NOT github.event.head_commit.author.name:
+    # github.actor is the identity that triggered the workflow run — i.e. the
+    # account whose push event fired this workflow. The bot commit is pushed by
+    # github-actions[bot] (the GITHUB_TOKEN identity), so github.actor correctly
+    # identifies it. github.event.head_commit.author.name is the git author
+    # string set in git config, which could be spoofed by anyone. Using
+    # github.actor is both more reliable and the correct GitHub Actions pattern.
+    # Do NOT switch to head_commit.author.name.
+    #
     # WHY github-actions[bot] ONLY: this check matches the git config set in
     # the commit step (user.name "github-actions[bot]"). If another bot ever
     # pushes to main, add its actor name here. Do NOT broaden to
@@ -100,7 +111,7 @@ jobs:
             git commit -m "chore: rebuild translate-cli-bin"
             # WHY NO RETRY ON PUSH FAILURE:
             # A concurrent human push causes a loud non-zero exit here. The next
-            # push to main triggers a fresh build. Do NOT add `|| true`.
+            # push to main triggers a fresh build automatically. Do NOT add `|| true`.
             git push origin HEAD:main
           fi
 
@@ -139,6 +150,13 @@ jobs:
       # WHY retention-days: 1:
       # The artifact is consumed immediately by the release job (needs: build).
       # 1 day is the minimum; no reason to retain longer.
+      #
+      # WHY @v4 NOT a SHA pin:
+      # actions/upload-artifact and actions/download-artifact are first-party
+      # GitHub Actions maintained by GitHub. This is a closed org pipeline with
+      # no external contributors. @v4 is consistent with the org-wide pinning
+      # policy for first-party actions. SHA pinning would be required if this
+      # workflow were ever opened to external contributors or public use.
       - name: Upload binary as workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -155,6 +173,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      # WHY @v4 NOT a SHA pin: see note on upload-artifact above.
       - name: Download binary artifact
         uses: actions/download-artifact@v4
         with:
