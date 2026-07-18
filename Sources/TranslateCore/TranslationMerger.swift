@@ -13,9 +13,21 @@ public enum TranslationMerger {
     // timeZone forced to UTC so manifests committed from runners in different system
     // timezones produce identical translatedAt strings for the same moment.
     // Without this, two runners (e.g. UTC and CEST) would generate spurious manifest diffs.
-    private static let isoFormatter: ISO8601DateFormatter = {
+    //
+    // nonisolated(unsafe): ISO8601DateFormatter is a non-Sendable NSObject subclass; Swift 6
+    // strict concurrency rejects it as a plain static stored property on an enum.
+    // This is safe because:
+    //   1. The formatter is initialised exactly once inside the lazy closure below.
+    //   2. It is never mutated after initialisation — only .string(from:) is called on it.
+    //   3. `private` access means no external caller can ever reach this property,
+    //      so the immutability contract is enforced structurally, not just by convention.
+    // Do NOT add mutation to this formatter without revisiting this annotation.
+    private nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let fmt = ISO8601DateFormatter()
-        fmt.timeZone = TimeZone(identifier: "UTC")!
+        // TimeZone(secondsFromGMT: 0) is the crash-safe way to express UTC.
+        // TimeZone(identifier:) returns an Optional and would require a force-unwrap;
+        // secondsFromGMT: 0 is a non-failable initialiser with no failure path.
+        fmt.timeZone = TimeZone(secondsFromGMT: 0)
         return fmt
     }()
 
@@ -45,6 +57,9 @@ public enum TranslationMerger {
         var updated = base
         for (key, translatedValue) in slice {
             // Skip if the key was removed between diff and merge (unlikely but defensive)
+            // `var entry` (not `let`) is required: we mutate entry.localizations two lines
+            // below before writing it back into updated.strings. The compiler enforces this —
+            // changing to `let` produces a compile error on the `entry.localizations =` line.
             guard var entry = updated.strings[key] else { continue }
             var localizations = entry.localizations ?? [:]
             localizations[locale] = XCLocalization(
@@ -77,6 +92,12 @@ public enum TranslationMerger {
     /// call site and removes a redundant XCStrings lookup inside this function.
     /// Do NOT remove `sourceValues` to match the original spec — the spec is stale on this point.
     ///
+    /// **`inout manifest` — intentional asymmetry with `merge()`:**
+    /// `merge()` uses value-return because it is called in a loop (one copy per locale).
+    /// `updateManifest()` uses `inout` because it is called once and the manifest dict can
+    /// be large — avoiding an extra full copy here is the right trade-off. The two functions
+    /// have different call-site shapes by design; the asymmetry is not an oversight.
+    ///
     /// - Parameters:
     ///   - manifest: Modified in-place (`inout`) to avoid copying the full entry dict.
     ///   - keys: The keys that were translated this run (from `DiffExtractor.changedKeys().keys`).
@@ -97,13 +118,22 @@ public enum TranslationMerger {
             // should never happen — but if a future refactor passes them from different
             // sources, a missing sourceValue would silently skip the manifest update,
             // causing that key to be re-translated on every subsequent run forever.
+            //
+            // fputs to stderr is the correct CLI idiom for diagnostic output — it is not
+            // leftover debug code. stdout is reserved for machine-readable output; warnings
+            // must go to stderr so they don't corrupt piped output.
             guard let sourceValue = sourceValues[key] else {
                 fputs("Warning: updateManifest: no sourceValue for key '\(key)'"
                     + " — manifest not updated; key will be re-translated next run.\n", stderr)
                 continue
             }
             let existingLocales = manifest.entries[key]?.locales ?? []
-            // Union: keep existing locales + add newly completed ones; sort for stable JSON diffs
+            // Union + dedup + sort: intentional three-step pattern.
+            // Set() deduplicates so a locale already in existingLocales isn't recorded twice
+            // if completedLocales re-lists it (possible on a retry run).
+            // .sorted() produces a stable key order so repeated runs don't generate spurious
+            // JSON diffs — identical logical state must produce byte-identical manifest files.
+            // Array(Set(...)).sorted() is O(n log n) and n is always small (locale count ~tens).
             let mergedLocales = Array(Set(existingLocales + completedLocales)).sorted()
             manifest.entries[key] = ManifestEntry(
                 sourceValue: sourceValue,
