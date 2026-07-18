@@ -13,7 +13,10 @@ public enum TranslationMerger {
     // timeZone forced to UTC so manifests committed from runners in different system
     // timezones produce identical translatedAt strings for the same moment.
     // Without this, two runners (e.g. UTC and CEST) would generate spurious manifest diffs.
-    private static let isoFormatter: ISO8601DateFormatter = {
+    // nonisolated(unsafe): ISO8601DateFormatter is a non-Sendable NSObject subclass; Swift 6
+    // strict concurrency rejects it as a plain static. The formatter is initialised once and
+    // never mutated, so there is no actual data race — nonisolated(unsafe) is correct here.
+    private nonisolated(unsafe) static let isoFormatter: ISO8601DateFormatter = {
         let fmt = ISO8601DateFormatter()
         fmt.timeZone = TimeZone(identifier: "UTC")!
         return fmt
