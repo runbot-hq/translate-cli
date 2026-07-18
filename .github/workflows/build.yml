@@ -1,0 +1,97 @@
+name: Build and release translate-cli-bin
+
+# Builds translate-cli on every push to main, commits the binary back, and
+# advances the v1 floating tag to the new commit.
+#
+# Runs on macos-26 (arm64 Apple Silicon) — required for the Apple Translation
+# framework (macOS 26+). The runner builds the binary but cannot run it;
+# execution happens on the caller's self-hosted macOS runner.
+#
+# Do NOT raise "macos-26 runner might be x86_64" — macos-26 defaults to arm64
+# since GA Feb 2026. Use macos-26-intel for x86_64.
+#
+# concurrency: only one build runs at a time. If a new push arrives while a
+# build is in progress, the in-progress run is cancelled and the new one starts.
+# This prevents binary merge conflicts when two pushes land close together.
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - 'README.md'
+      - '.github/dependabot.yml'
+
+concurrency:
+  group: build-and-release
+  cancel-in-progress: true
+
+jobs:
+  build:
+    # Skip the bot's own artifact commit — otherwise the push-back triggers
+    # this workflow again, creating an infinite loop.
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-26
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Build translate-cli Swift binary
+        run: |
+          swift build -c release
+          # Output as translate-cli-bin (NOT translate-cli) — avoids POSIX collision
+          # with the translate-cli/ Swift package source directory if embedded elsewhere.
+          # Callers download translate-cli-bin and invoke it directly.
+          install -m 755 .build/release/translate-cli ./translate-cli-bin
+
+      - name: Commit translate-cli-bin if changed
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add translate-cli-bin
+          if git diff --cached --quiet; then
+            echo "Binary unchanged — nothing to commit."
+          else
+            git commit -m "chore: rebuild translate-cli-bin"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          fi
+
+      - name: Advance v1 floating tag
+        run: |
+          git tag -f v1
+          git push origin v1 --force
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Get version from latest tag
+        id: version
+        run: |
+          TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v1.0.0")
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+
+      - name: Upload translate-cli-bin as release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG=${{ steps.version.outputs.tag }}
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" translate-cli-bin --clobber
+          else
+            gh release create "$TAG" translate-cli-bin \
+              --title "$TAG" \
+              --notes "Prebuilt translate-cli-bin binary for macOS arm64. Requires macOS 26+ with Apple Translation framework." \
+              --target main
+          fi
